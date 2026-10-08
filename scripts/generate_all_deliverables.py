@@ -5,7 +5,7 @@ from reportlab.lib.pagesizes import letter
 from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.platypus import (
-    SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak, KeepTogether
+    SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak, KeepTogether, Image as RLImage
 )
 from reportlab.graphics.shapes import Drawing, Rect, String, Line, Group
 from pptx import Presentation
@@ -22,8 +22,8 @@ def build_pdf_document(filename: Path, story_flowables):
         pagesize=letter,
         rightMargin=40,
         leftMargin=40,
-        topMargin=40,
-        bottomMargin=40
+        topMargin=35,
+        bottomMargin=35
     )
     doc.build(story_flowables)
     print(f"Generated PDF: {filename}")
@@ -34,102 +34,72 @@ def build_pdf_document(filename: Path, story_flowables):
 # ==============================================================================
 def generate_architecture_diagram():
     out_path = PROJECT_ROOT / "architecture" / "Architecture_Diagram.pdf"
+    img_path = PROJECT_ROOT / "architecture" / "Architecture_Diagram.png"
     styles = getSampleStyleSheet()
     
     title_style = ParagraphStyle(
         'DocTitle',
         parent=styles['Heading1'],
-        fontSize=20,
-        leading=24,
+        fontSize=18,
+        leading=22,
         textColor=colors.HexColor('#1E3A8A'),
+        spaceAfter=6
+    )
+    subtitle_style = ParagraphStyle(
+        'DocSubtitle',
+        parent=styles['Normal'],
+        fontSize=9.5,
+        leading=13,
+        textColor=colors.HexColor('#475569'),
         spaceAfter=10
     )
     body_style = ParagraphStyle(
         'Body',
         parent=styles['Normal'],
-        fontSize=10,
-        leading=14,
+        fontSize=8.5,
+        leading=11.5,
         textColor=colors.HexColor('#334155')
     )
 
     story = [
-        Paragraph("ClaimLens — Architecture Diagram", title_style),
-        Paragraph("<b>End-to-End System Architecture:</b> Dataset Ingestion &rarr; Hybrid RAG &rarr; Multi-Agent Workflow &rarr; Microservice API &rarr; UI &rarr; Evaluation", body_style),
-        Spacer(1, 15)
+        Paragraph("ClaimLens — System Architecture Diagram", title_style),
+        Paragraph("<b>End-to-End System Architecture:</b> Client UI &rarr; FastAPI Microservice &rarr; Guardrails Gate &rarr; 7-Agent Sequential Engine &rarr; Hybrid RAG & ML Services &rarr; Continuous Feedback Loop", subtitle_style),
     ]
 
-    # Visual Architecture Canvas Flow
-    d = Drawing(530, 480)
+    # Embed High-Resolution Architecture Diagram Image
+    if img_path.exists():
+        # Printable width: 532 pt (letter width 612 - 80 margin). Aspect ratio 1024x682 -> 530 x 353
+        story.append(RLImage(str(img_path), width=530, height=353))
+        story.append(Spacer(1, 10))
     
-    # Background Canvas Box
-    d.add(Rect(0, 0, 530, 480, fillColor=colors.HexColor('#F8FAFC'), strokeColor=colors.HexColor('#CBD5E1'), strokeWidth=1, rx=8, ry=8))
-
-    # Helper to draw components
-    def draw_box(x, y, w, h, title, subtitle, bg_color, border_color):
-        g = Group()
-        g.add(Rect(x, y, w, h, fillColor=colors.HexColor(bg_color), strokeColor=colors.HexColor(border_color), strokeWidth=1.5, rx=6, ry=6))
-        g.add(String(x + 10, y + h - 18, title, fontName="Helvetica-Bold", fontSize=11, fillColor=colors.HexColor('#0F172A')))
-        if subtitle:
-            g.add(String(x + 10, y + h - 32, subtitle, fontName="Helvetica", fontSize=8.5, fillColor=colors.HexColor('#475569')))
-        return g
-
-    # Row 1: Data Source & Preprocessing
-    d.add(draw_box(20, 400, 230, 55, "1. Hugging Face Dataset", "ziadatalabs/FreeInsuranceClaims100M (Parquet)", "#EFF6FF", "#3B82F6"))
-    d.add(draw_box(280, 400, 230, 55, "2. Data Preprocessing & Pipeline", "13 Field Validation, Schema Normalization", "#EFF6FF", "#3B82F6"))
-    d.add(Line(250, 427, 280, 427, strokeColor=colors.HexColor('#2563EB'), strokeWidth=2))
-
-    # Arrow Down
-    d.add(Line(395, 400, 395, 360, strokeColor=colors.HexColor('#2563EB'), strokeWidth=2))
-
-    # Row 2: Vector Store & Machine Learning Models
-    d.add(draw_box(20, 305, 230, 55, "3A. Hybrid Retrieval Index", "Vector Store (Cosine) + BM25 (RRF)", "#ECFDF5", "#10B981"))
-    d.add(draw_box(280, 305, 230, 55, "3B. Machine Learning Models", "Amount, Days to Resolution, Fraud Classifier", "#FEF3C7", "#F59E0B"))
-    d.add(Line(395, 360, 135, 360, strokeColor=colors.HexColor('#2563EB'), strokeWidth=2))
-    d.add(Line(135, 360, 135, 360, strokeColor=colors.HexColor('#2563EB'), strokeWidth=2))
-
-    # Arrow Down to Multi-Agent Workflow
-    d.add(Line(135, 305, 135, 270, strokeColor=colors.HexColor('#10B981'), strokeWidth=2))
-    d.add(Line(395, 305, 395, 270, strokeColor=colors.HexColor('#F59E0B'), strokeWidth=2))
-    d.add(Line(135, 270, 395, 270, strokeColor=colors.HexColor('#64748B'), strokeWidth=1.5))
-    d.add(Line(265, 270, 265, 245, strokeColor=colors.HexColor('#64748B'), strokeWidth=2))
-
-    # Row 3: Multi-Agent Insurance Claims Workflow
-    d.add(draw_box(20, 155, 490, 85, "4. Multi-Agent Insurance Claims Engine", "Investigation Agent  |  Risk Assessment Agent  |  Recommendation Agent  |  LLM-as-Judge", "#F3E8FF", "#8B5CF6"))
-    
-    # Internal agent badges in row 3
-    d.add(Rect(35, 165, 105, 40, fillColor=colors.HexColor('#FFFFFF'), strokeColor=colors.HexColor('#C084FC'), rx=4, ry=4))
-    d.add(String(42, 185, "Investigation", fontName="Helvetica-Bold", fontSize=9, fillColor=colors.HexColor('#6B21A8')))
-    d.add(String(42, 173, "Precedents & History", fontName="Helvetica", fontSize=7.5, fillColor=colors.HexColor('#7E22CE')))
-
-    d.add(Rect(155, 165, 105, 40, fillColor=colors.HexColor('#FFFFFF'), strokeColor=colors.HexColor('#C084FC'), rx=4, ry=4))
-    d.add(String(162, 185, "Risk Assessment", fontName="Helvetica-Bold", fontSize=9, fillColor=colors.HexColor('#6B21A8')))
-    d.add(String(162, 173, "Fraud Drivers & Score", fontName="Helvetica", fontSize=7.5, fillColor=colors.HexColor('#7E22CE')))
-
-    d.add(Rect(275, 165, 105, 40, fillColor=colors.HexColor('#FFFFFF'), strokeColor=colors.HexColor('#C084FC'), rx=4, ry=4))
-    d.add(String(282, 185, "Recommendation", fontName="Helvetica-Bold", fontSize=9, fillColor=colors.HexColor('#6B21A8')))
-    d.add(String(282, 173, "Action & Payout", fontName="Helvetica", fontSize=7.5, fillColor=colors.HexColor('#7E22CE')))
-
-    d.add(Rect(395, 165, 100, 40, fillColor=colors.HexColor('#FFFFFF'), strokeColor=colors.HexColor('#C084FC'), rx=4, ry=4))
-    d.add(String(402, 185, "LLM-as-Judge", fontName="Helvetica-Bold", fontSize=9, fillColor=colors.HexColor('#6B21A8')))
-    d.add(String(402, 173, "Policy Audit (9.3/10)", fontName="Helvetica", fontSize=7.5, fillColor=colors.HexColor('#7E22CE')))
-
-    # Arrow Down to API Layer
-    d.add(Line(265, 155, 265, 125, strokeColor=colors.HexColor('#8B5CF6'), strokeWidth=2))
-
-    # Row 4: API Microservice Layer
-    d.add(draw_box(20, 70, 490, 55, "5. FastAPI Microservice Layer (Port 8000)", "Endpoints: /health, /claims/validate, /claims/hybrid-search, /claims/predict, /claims/analyze, /claims/feedback", "#F1F5F9", "#64748B"))
-
-    # Arrow Down to Frontend & Evaluation
-    d.add(Line(140, 70, 140, 45, strokeColor=colors.HexColor('#64748B'), strokeWidth=2))
-    d.add(Line(390, 70, 390, 45, strokeColor=colors.HexColor('#64748B'), strokeWidth=2))
-
-    # Row 5: Frontend & Evaluation
-    d.add(draw_box(20, 5, 230, 40, "6A. Streamlit UI (frontend.py)", "Interactive Adjuster Dashboard & Feedback", "#FEF2F2", "#EF4444"))
-    d.add(draw_box(280, 5, 230, 40, "6B. DeepEval Benchmark Suite", "Faithfulness (95%), Relevancy (96%)", "#F0FDF4", "#22C55E"))
-
-    story.append(d)
-    story.append(Spacer(1, 15))
-    story.append(Paragraph("<b>Architectural Pattern:</b> Modular Service-Oriented Architecture (SOA) decoupling data preprocessing, hybrid vector search, predictive ML estimators, and LLM-powered multi-agent orchestration for resilient insurance operations.", body_style))
+    # Subsystem Specification Table
+    subsystem_data = [
+        ["#", "Subsystem Component", "Architectural Responsibility & Technologies"],
+        ["1", "Client / Frontend", "Streamlit Adjuster Dashboard (frontend.py) and External REST API clients."],
+        ["2", "FastAPI Layer", "Asynchronous gateway (port 8000) exposing /analyze, /classify, /predict, /hybrid-search, /feedback, /feedback/retrain."],
+        ["3", "Validation & Guardrails", "Pydantic schema validation, range checks, date validation, and prompt injection sanitization."],
+        ["4", "Multi-Agent Workflow (Sequential)", "Strict 7-stage state cascade: 1.Classification &rarr; 2.Precedent RAG &rarr; 3.ML Predictor &rarr; 4.Investigation &rarr; 5.Risk &rarr; 6.Recommendation &rarr; 7.LLM Judge."],
+        ["5", "Data Layer", "Parquet/CSV samples (Hugging Face 100M claims), processed narrative texts, and versioned pickle model bundles."],
+        ["6", "RAG & ML Services", "Hybrid RAG (NumPy in-memory vector store + BM25Okapi + Weighted RRF) and Calibrated Random Forests (loss, days, fraud)."],
+        ["7", "Feedback & Retraining Pipeline", "Append-only adjuster audit feedback store, automated holdout evaluation, Brier score gate, and zero-downtime hot reload."],
+        ["8", "Final Analysis Result", "Standardized JSON payload returned to client containing classification, benchmarks, findings, invariants, and judge verdict."]
+    ]
+    t = Table(subsystem_data, colWidths=[20, 160, 350])
+    t.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#1E3A8A')),
+        ('TEXTCOLOR', (0,0), (-1,0), colors.white),
+        ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0,0), (-1,-1), 7.5),
+        ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#CBD5E1')),
+        ('ROWBACKGROUNDS', (0,1), (-1,-1), [colors.white, colors.HexColor('#F8FAFC')]),
+        ('ALIGN', (0,0), (0,-1), 'CENTER'),
+        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 3),
+        ('TOPPADDING', (0,0), (-1,-1), 3),
+    ]))
+    story.append(t)
+    story.append(Spacer(1, 8))
+    story.append(Paragraph("<b>Architectural Invariants & Security:</b> Deterministic financial settlement bounds (payout capped at max(0, claim_amount - deductible)), calibrated fraud risk distribution, and independent LLM-as-Judge audit pass rate of 9.3/10.", body_style))
 
     build_pdf_document(out_path, story)
 
@@ -511,28 +481,42 @@ def generate_presentation_deck():
 
     # Slide 3: Solution Architecture
     s3 = prs.slides.add_slide(blank_layout)
-    add_header(s3, "End-to-End System Architecture")
-    add_card(s3, 0.8, 1.5, 3.6, 5.4, "1. Data & Hybrid Search", [
-        "Hugging Face 100M Dataset sample (13 core fields).",
-        "ChromaDB Vector Store (Cosine Similarity).",
-        "Rank-BM25 Keyword Search Engine.",
-        "Reciprocal Rank Fusion (RRF) for unified ranking.",
-        "Dynamic metadata filters (State, Type, Amount)."
-    ])
-    add_card(s3, 4.8, 1.5, 3.6, 5.4, "2. Multi-Agent & ML Engine", [
-        "Triage & Complexity Classifier (P1 to P4 SLA).",
-        "Investigation Agent analyzes history & precedents.",
-        "Risk Assessment Agent extracts fraud drivers.",
-        "Recommendation Agent determines pathway.",
-        "Independent LLM-as-Judge audit validation."
-    ], bg_rgb=(243, 232, 255), border_rgb=(192, 132, 252))
-    add_card(s3, 8.8, 1.5, 3.6, 5.4, "3. Microservice & Frontend", [
-        "FastAPI Asynchronous Microservice (Port 8000).",
-        "Interactive Streamlit Dashboard (frontend.py).",
-        "Human-in-the-Loop Feedback Loop.",
-        "Input Validation & Security Guardrails.",
-        "DeepEval Automated Quality Suite."
-    ], bg_rgb=(236, 253, 245), border_rgb=(110, 231, 183))
+    add_header(s3, "ClaimLens — End-to-End System Architecture")
+    img_arch = PROJECT_ROOT / "architecture" / "Architecture_Diagram.png"
+    if img_arch.exists():
+        s3.shapes.add_picture(str(img_arch), Inches(0.6), Inches(1.5), width=Inches(8.2), height=Inches(5.46))
+        add_card(s3, 9.1, 1.5, 3.6, 5.46, "8 Core Subsystems", [
+            "1. Client UI & External API Calls",
+            "2. FastAPI Gateway (Port 8000)",
+            "3. Input Validation & Guardrails",
+            "4. 7-Agent Sequential Engine",
+            "5. Parquet & Chroma Data Layer",
+            "6. Hybrid RAG (BM25 + Dense RRF)",
+            "7. Calibrated Random Forests",
+            "8. MLOps Retraining Feedback Loop"
+        ], bg_rgb=(243, 232, 255), border_rgb=(192, 132, 252))
+    else:
+        add_card(s3, 0.8, 1.5, 3.6, 5.4, "1. Data & Hybrid Search", [
+            "Hugging Face 100M Dataset sample (13 core fields).",
+            "ChromaDB Vector Store (Cosine Similarity).",
+            "Rank-BM25 Keyword Search Engine.",
+            "Reciprocal Rank Fusion (RRF) for unified ranking.",
+            "Dynamic metadata filters (State, Type, Amount)."
+        ])
+        add_card(s3, 4.8, 1.5, 3.6, 5.4, "2. Multi-Agent & ML Engine", [
+            "Triage & Complexity Classifier (P1 to P4 SLA).",
+            "Investigation Agent analyzes history & precedents.",
+            "Risk Assessment Agent extracts fraud drivers.",
+            "Recommendation Agent determines pathway.",
+            "Independent LLM-as-Judge audit validation."
+        ], bg_rgb=(243, 232, 255), border_rgb=(192, 132, 252))
+        add_card(s3, 8.8, 1.5, 3.6, 5.4, "3. Microservice & Frontend", [
+            "FastAPI Asynchronous Microservice (Port 8000).",
+            "Interactive Streamlit Dashboard (frontend.py).",
+            "Human-in-the-Loop Feedback Loop.",
+            "Input Validation & Security Guardrails.",
+            "DeepEval Automated Quality Suite."
+        ], bg_rgb=(236, 253, 245), border_rgb=(110, 231, 183))
 
     # Slide 4: Multi-Agent Workflow
     s4 = prs.slides.add_slide(blank_layout)
