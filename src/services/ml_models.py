@@ -190,15 +190,17 @@ class ClaimsMLService:
             for name, imp in zip(self.feature_names, importances)
         }
 
-        # Local feature contribution for this specific claim
-        local_attributions = {}
+        # Local feature contribution heuristic indicator for this specific claim
+        # NOTE: This is an interpretable heuristic proxy combining scaled inputs with
+        # tree Gini feature importances (explicitly documented as heuristic proxy, not exact TreeSHAP).
+        heuristic_impact = {}
         row_vals = X_single[0]
         for idx, (name, val) in enumerate(zip(self.feature_names, row_vals)):
             weight = float(importances[idx])
             if val > 0:
-                local_attributions[name] = round(weight * min(4.0, float(val)), 4)
+                heuristic_impact[name] = round(weight * min(4.0, float(val)), 4)
             else:
-                local_attributions[name] = 0.0
+                heuristic_impact[name] = 0.0
 
         # Underwriting policy flags (rule-based)
         policy_flags = []
@@ -239,7 +241,8 @@ class ClaimsMLService:
             "top_risk_drivers": risk_drivers,
             "underwriting_policy_flags": policy_flags,
             "feature_importance_summary": feat_imp_map,
-            "local_feature_attributions": local_attributions,
+            "heuristic_local_feature_impact": heuristic_impact,
+            "local_feature_attributions": heuristic_impact,
             "model_version": getattr(self, "model_version", "v1.0")
         }
 

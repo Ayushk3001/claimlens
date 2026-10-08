@@ -110,8 +110,14 @@ class MultiAgentClaimsWorkflow:
         predicted_amt = ml_results.get("predicted_claim_amount", amt)
         c_type = str(claim_data.get("claim_type", "Auto")).capitalize()
 
-        # Strict Insurance Settlement Rule:
-        # Maximum allowable net payout = max(0, Claim Amount - Applicable Deductible)
+        # Strict Insurance Settlement Invariants:
+        # 1. Theoretical Maximum Net Settlement Ceiling = max(0, Claim Amount - Applicable Deductible)
+        # 2. Authorized Payable Net Payout = Actual authorized cash disbursement (strictly <= ceiling)
+        amt = float(claim_data.get("claim_amount", 0))
+        deductible = float(claim_data.get("deductible", 500))
+        predicted_amt = ml_results.get("predicted_claim_amount", amt)
+        c_type = str(claim_data.get("claim_type", "Auto")).capitalize()
+
         max_net_payout = max(0.0, round(amt - deductible, 2))
 
         # Decision routing logic
@@ -119,7 +125,8 @@ class MultiAgentClaimsWorkflow:
             decision = "SIU_REFERRAL"
             action = "Refer to Special Investigation Unit (SIU) for comprehensive anti-fraud review."
             fast_track = False
-            payout_range = f"Withheld pending investigation (Max potential net: $0.00)"
+            authorized_net_payout = 0.0
+            payout_range = f"$0.00 (Disbursement withheld pending SIU investigation; Net ceiling: ${max_net_payout:,.2f})"
             steps = [
                 "Place automated hold on claim settlement disbursement.",
                 "Assign SIU investigator to verify incident location, physical evidence, and scene inspection.",
@@ -130,6 +137,7 @@ class MultiAgentClaimsWorkflow:
             decision = "CLAIM_WITHIN_DEDUCTIBLE"
             action = f"Claimed loss (${amt:,.2f}) does not exceed the applicable policy deductible (${deductible:,.2f}). Zero net indemnity due."
             fast_track = True
+            authorized_net_payout = 0.0
             payout_range = "$0.00 (Loss within deductible)"
             steps = [
                 f"Verify incident damage assessment (${amt:,.2f}) against applicable policy deductible (${deductible:,.2f}).",
@@ -145,6 +153,7 @@ class MultiAgentClaimsWorkflow:
             est_base_loss = min(amt, predicted_amt)
             lower_net = max(0.0, round(est_base_loss * 0.85 - deductible, 2))
             upper_net = max(lower_net, round(min(max_net_payout, est_base_loss - deductible), 2))
+            authorized_net_payout = upper_net
 
             if lower_net >= upper_net or upper_net == 0.0:
                 payout_range = f"${max_net_payout:,.2f}"
@@ -176,6 +185,7 @@ class MultiAgentClaimsWorkflow:
             decision = "AUTO_APPROVE"
             action = "Eligible for Fast-Track Automated Settlement."
             fast_track = True
+            authorized_net_payout = max_net_payout
             payout_range = f"${max_net_payout:,.2f}"
             steps = [
                 f"Apply policy deductible of ${deductible:,.2f} to claimed loss of ${amt:,.2f}.",
@@ -202,6 +212,8 @@ class MultiAgentClaimsWorkflow:
             "decision": decision,
             "action_statement": action,
             "fast_track_eligible": fast_track,
+            "net_settlement_ceiling": max_net_payout,
+            "authorized_net_payout": authorized_net_payout,
             "recommended_payout": payout_range,
             "actionable_steps": steps,
             "executive_rationale": llm_reasoning or f"Based on {risk_analysis.get('risk_tier')} profile and {investigation.get('findings')}, {action}"
@@ -217,27 +229,57 @@ class MultiAgentClaimsWorkflow:
         """LLM-as-Judge validation module evaluating factual consistency, completeness, and financial compliance."""
         amt = float(claim_data.get("claim_amount", 0))
         deductible = float(claim_data.get("deductible", 500))
-        fraud_prob = risk_analysis.get("fraud_probability_percent", 0.0)
-        decision = recommendation.get("decision", "")
+        fraud_prob = float(risk_analysis.get("fraud_probability_percent", 0.0))
+        decision = str(recommendation.get("decision", ""))
 
         # Scoring heuristics & LLM validation
         factual_score = 9.5
         completeness_score = 9.0
         compliance_score = 9.5
-
         issues = []
 
-        # 1. Financial Consistency Rule: Net Payout MUST NOT exceed (Claim Amount - Deductible)
-        max_allowable_net = max(0.0, amt - deductible)
-        rec_payout_str = str(recommendation.get("recommended_payout", ""))
+        # 1. Financial Consistency: Invariant Verification
+        max_allowable_net = max(0.0, round(amt - deductible, 2))
+
+        # Check structured numeric authorized payout if provided
+        if "authorized_net_payout" in recommendation and recommendation["authorized_net_payout"] is not None:
+            structured_payout = float(recommendation["authorized_net_payout"])
+        else:
+            # Fallback to regex parsing of recommended_payout string
+            import re
+            rec_payout_str = str(recommendation.get("recommended_payout", ""))
+            found_numbers = [float(x.replace(",", "")) for x in re.findall(r"\$([0-9,]+\.?[0-9]*)", rec_payout_str)]
+            structured_payout = max(found_numbers) if found_numbers else 0.0
+
+        # Invariant Rule A: Payout cannot exceed Net Settlement Ceiling
+        if structured_payout > max_allowable_net + 0.01:
+            factual_score -= 5.0
+            compliance_score -= 6.0
+            issues.append(f"Financial Inconsistency: Authorized payout (${structured_payout:,.2f}) exceeds maximum allowable net loss after deductible (${max_allowable_net:,.2f}).")
+
+        # Invariant Rule B: Loss within deductible must have $0.00 authorized payout
+        if amt <= deductible and structured_payout > 0.0:
+            factual_score -= 5.0
+            compliance_score -= 6.0
+            issues.append(f"Financial Inconsistency: Claimed loss (${amt:,.2f}) is within deductible (${deductible:,.2f}); authorized payout must be $0.00 but got ${structured_payout:,.2f}.")
+
+        # Invariant Rule C: SIU referrals must not authorize payout disbursement
+        if decision == "SIU_REFERRAL" and structured_payout > 0.0:
+            factual_score -= 5.0
+            compliance_score -= 6.0
+            issues.append(f"Financial Inconsistency: SIU referral must have $0.00 authorized payout disbursement pending investigation, but got ${structured_payout:,.2f}.")
+
+        # Invariant Rule D: Regex cross-validation for narrative leakage of exceeding payouts
         import re
-        found_numbers = [float(x.replace(",", "")) for x in re.findall(r"\$([0-9,]+\.?[0-9]*)", rec_payout_str)]
-        if found_numbers and decision != "SIU_REFERRAL":
-            highest_rec = max(found_numbers)
-            if highest_rec > max_allowable_net + 1.0:
-                factual_score -= 5.0
-                compliance_score -= 6.0
-                issues.append(f"Financial Inconsistency: Recommended payout (${highest_rec:,.2f}) exceeds maximum allowable net loss after deductible (${max_allowable_net:,.2f}).")
+        rec_payout_str = str(recommendation.get("recommended_payout", ""))
+        for num in [float(x.replace(",", "")) for x in re.findall(r"\$([0-9,]+\.?[0-9]*)", rec_payout_str)]:
+            # Allow mentioning the ceiling itself e.g. "(Net max: $3,300.00)" or "(Net ceiling: $3,300.00)"
+            if num > max_allowable_net + 1.0 and decision != "SIU_REFERRAL":
+                msg = f"Financial Inconsistency: Payout narrative contains amount (${num:,.2f}) exceeding net deductible ceiling (${max_allowable_net:,.2f})."
+                if msg not in issues:
+                    factual_score -= 4.0
+                    compliance_score -= 5.0
+                    issues.append(msg)
 
         # 2. Decision Logic Alignment
         if fraud_prob >= 50.0 and decision == "AUTO_APPROVE":

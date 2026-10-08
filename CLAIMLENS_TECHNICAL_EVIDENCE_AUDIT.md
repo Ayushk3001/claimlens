@@ -443,3 +443,34 @@ To satisfy any independent AI/ML or insurance panelist, share the following veri
    - Code: [`src/rag/hybrid_retriever.py`](file:///e:/prodapt/clamin/src/rag/hybrid_retriever.py#L65-L83) showing Reciprocal Rank Fusion ($k=60$) combining cosine vector search and BM25Okapi keyword search.
 5. **Evaluation Benchmark Report:**
    - Run output of `python -m tests.run_evaluation` verifying 90.7% Faithfulness, 96.0% Relevancy, and 95.0% Policy Compliance.
+
+---
+
+## 11. Production Refinements & Rigorous Verification (Post-Code Review)
+
+Following external technical code review, four targeted refinements were implemented and validated:
+
+### 1. Retraining Safety & Promotion Gate (MLOps)
+- **Label Integrity:** SIU referrals are recognized as investigative suspicions rather than confirmed fraud ground truth. Explicit `confirmed_fraud` flag (`True`/`False`) is supported in [`FeedbackRequest`](file:///e:/prodapt/clamin/src/api/routes.py#L39-L46) and [`FeedbackService`](file:///e:/prodapt/clamin/src/services/feedback_service.py#L26-L40).
+- **80/20 Holdout Validation Split:** Replaced in-sample evaluation with an explicit stratified `train_test_split(..., test_size=0.2, stratify=y_fraud)` on augmented datasets.
+- **Automated Promotion Gate:** Both candidate and active models are evaluated on the identical holdout validation set. If candidate validation Brier score degrades (`cand_val_brier > base_val_brier + 1e-4`), promotion is automatically rejected (`status: rejected_regression`), protecting active production weights from regression.
+
+### 2. Underwriting Settlement Invariants
+- **Decoupled Settlement Math:** Theoretical maximum net indemnity ceiling (`net_settlement_ceiling = max(0.0, round(claim_amount - deductible, 2))`) and authorized payable disbursement (`authorized_net_payout`) are returned as standalone structured numeric fields across all decision branches.
+- **Invariants Across Branches:**
+  - `SIU_REFERRAL`: `authorized_net_payout = $0.00` (disbursement withheld pending inquiry).
+  - `CLAIM_WITHIN_DEDUCTIBLE`: `authorized_net_payout = $0.00` (zero net indemnity).
+  - `MANUAL_ADJUSTER_REVIEW`: `0.0 <= authorized_net_payout <= net_settlement_ceiling`.
+  - `AUTO_APPROVE`: `authorized_net_payout = net_settlement_ceiling`.
+
+### 3. Model-Faithful Explainability
+- **Clear Attribution Provenance:** Differentiated global Gini feature importances from local instance indicators.
+- **Explicit Heuristic Labeling:** Renamed `local_feature_attributions` to `heuristic_local_feature_impact` in [`src/services/ml_models.py`](file:///e:/prodapt/clamin/src/services/ml_models.py#L193-L244) with transparent documentation that it serves as an interpretable Gini-weighted proxy indicator, distinct from exact TreeSHAP attributions.
+
+### 4. Structured Numeric Settlement Validation in LLM-as-Judge
+- **Zero Regex Fragility:** Updated [`run_llm_as_judge`](file:///e:/prodapt/clamin/src/agents/multi_agent_workflow.py#L210-L275) to validate structured numeric fields (`authorized_net_payout`, `claim_amount`, `deductible`) directly.
+- **Automated Invariant Auditing:** Flags any recommendation where `authorized_net_payout > max_allowable_net`, where loss is within deductible but payout > 0, or where an SIU referral authorizes immediate cash disbursement. Regex serves solely as a secondary defense against text leakage.
+
+### Verification Status:
+- Automated test suite expanded to **21 passing tests** ([`tests/test_api.py`](file:///e:/prodapt/clamin/tests/test_api.py)).
+- All deliverables and `ClaimLens_Project_Submission.zip` regenerated and verified.

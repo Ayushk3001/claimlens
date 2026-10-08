@@ -159,13 +159,14 @@ def test_edge_case_zero_payout_violation_in_judge():
     assert any("Financial Inconsistency" in iss for iss in judge_res["detected_issues"])
 
 def test_feedback_retraining_pipeline_endpoint():
-    # Submit review and trigger controlled retraining
+    # Submit review with confirmed fraud and trigger controlled retraining
     fb_payload = {
         "claim_id": "CLM-0000000001",
         "adjuster_id": "ADJ-SENIOR-TEST",
         "adjuster_decision": "Sent to SIU",
         "agrees_with_ai": True,
         "adjusted_amount": 4200.0,
+        "confirmed_fraud": True,
         "notes": "Verified intentional damage pattern."
     }
     client.post("/claims/feedback", json=fb_payload)
@@ -173,8 +174,82 @@ def test_feedback_retraining_pipeline_endpoint():
     retrain_res = client.post("/claims/feedback/retrain?min_feedback_count=1")
     assert retrain_res.status_code == 200
     rdata = retrain_res.json()
-    assert rdata["status"] == "success"
+    assert rdata["status"] in ["success", "rejected_regression"]
     assert "active_version" in rdata
-    assert "candidate_accuracy" in rdata
+    if rdata["status"] == "success":
+        assert "candidate_validation_brier" in rdata
+    else:
+        assert "Promotion rejected" in rdata["message"]
+
+def test_settlement_invariants_across_branches():
+    from src.agents.multi_agent_workflow import multi_agent_workflow
+
+    # 1. SIU referral must have authorized_net_payout == 0.0
+    rec_siu = multi_agent_workflow.run_recommendation_agent(
+        claim_data={"claim_amount": 4200.0, "deductible": 900.0, "claim_type": "Auto"},
+        investigation={"findings": "Suspect"},
+        risk_analysis={"fraud_probability_percent": 65.0, "risk_tier": "High Risk"},
+        ml_results={"predicted_claim_amount": 4200.0}
+    )
+    assert rec_siu["decision"] == "SIU_REFERRAL"
+    assert rec_siu["authorized_net_payout"] == 0.0
+    assert rec_siu["net_settlement_ceiling"] == 3300.0
+
+    # 2. Within deductible must have authorized_net_payout == 0.0
+    rec_ded = multi_agent_workflow.run_recommendation_agent(
+        claim_data={"claim_amount": 600.0, "deductible": 900.0, "claim_type": "Auto"},
+        investigation={"findings": "Minor"},
+        risk_analysis={"fraud_probability_percent": 5.0, "risk_tier": "Low Risk"},
+        ml_results={"predicted_claim_amount": 600.0}
+    )
+    assert rec_ded["decision"] == "CLAIM_WITHIN_DEDUCTIBLE"
+    assert rec_ded["authorized_net_payout"] == 0.0
+    assert rec_ded["net_settlement_ceiling"] == 0.0
+
+    # 3. Auto approve must have authorized_net_payout == (amt - deductible)
+    rec_app = multi_agent_workflow.run_recommendation_agent(
+        claim_data={"claim_amount": 3000.0, "deductible": 500.0, "claim_type": "Auto"},
+        investigation={"findings": "Clear"},
+        risk_analysis={"fraud_probability_percent": 5.0, "risk_tier": "Low Risk"},
+        ml_results={"predicted_claim_amount": 3000.0}
+    )
+    assert rec_app["decision"] == "AUTO_APPROVE"
+    assert rec_app["authorized_net_payout"] == 2500.0
+    assert rec_app["net_settlement_ceiling"] == 2500.0
+
+def test_llm_judge_evaluates_structured_numeric_payout():
+    from src.agents.multi_agent_workflow import multi_agent_workflow
+
+    claim_data = {"claim_amount": 4200.0, "deductible": 900.0, "claim_type": "Auto"}
+    inv = {"findings": "Normal claim"}
+    risk = {"fraud_probability_percent": 10.0, "risk_tier": "Low Risk"}
+    
+    # Passing excessive structured numeric payout (4000 > 3300) without dollar formatting
+    violating_rec = {
+        "decision": "AUTO_APPROVE",
+        "authorized_net_payout": 4000.0,
+        "recommended_payout": "Standard approval issued",
+        "action_statement": "Authorize payment"
+    }
+    judge_res = multi_agent_workflow.run_llm_as_judge(claim_data, inv, risk, violating_rec)
+    assert judge_res["verdict"] == "FLAGGED_FOR_AUDIT"
+    assert any("exceeds maximum allowable net loss" in iss for iss in judge_res["detected_issues"])
+
+def test_ml_service_heuristic_local_feature_impact():
+    from src.services.ml_models import claims_ml_service
+
+    claim_sample = {
+        "claim_type": "Auto",
+        "state": "CA",
+        "policyholder_tenure_years": 4.0,
+        "previous_claims_count": 1,
+        "claim_amount": 3500.0,
+        "deductible": 500.0
+    }
+    res = claims_ml_service.predict(claim_sample)
+    assert "heuristic_local_feature_impact" in res
+    assert "local_feature_attributions" in res
+    assert isinstance(res["heuristic_local_feature_impact"], dict)
+
 
 

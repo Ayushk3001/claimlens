@@ -296,6 +296,7 @@ with tab3:
                 st.markdown(f"- ⚠️ {rd.replace('[Policy Rule] ', '')}")
 
         st.markdown("### 📊 Global Feature Importance Distribution")
+        st.caption("ℹ️ Global weights represent Tree Gini split importances. Local sample attributions represent an interpretable Gini-weighted proxy indicator, distinguished from exact TreeSHAP values.")
         imp_df = pd.DataFrame(
             list(preds["feature_importance_summary"].items()),
             columns=["Feature", "Importance Weight"]
@@ -315,15 +316,26 @@ with tab4:
         fb_decision = st.selectbox("Adjuster Decision", ["Approved", "Modified Payout", "Sent to SIU", "Denied"])
         fb_agrees = st.checkbox("Agrees with AI Recommendation", value=True)
         fb_adj_amt = st.number_input("Adjusted Payout Amount ($)", value=amount)
+        fb_confirmed_fraud = st.selectbox(
+            "Ground Truth Fraud Determination",
+            ["Unconfirmed / Pending Investigation", "Confirmed Fraud (True)", "Confirmed Legitimate / Exonerated (False)"]
+        )
         fb_notes = st.text_area("Adjuster Audit Notes", "Reviewed police report and verified repair quote.")
         
         if st.button("💾 Save Review to Continuous Improvement Store"):
+            confirmed_fraud_val = None
+            if fb_confirmed_fraud == "Confirmed Fraud (True)":
+                confirmed_fraud_val = True
+            elif fb_confirmed_fraud == "Confirmed Legitimate / Exonerated (False)":
+                confirmed_fraud_val = False
+
             entry = feedback_service.record_feedback({
                 "claim_id": fb_claim_id,
                 "adjuster_id": "ADJ-CURRENT-USER",
                 "adjuster_decision": fb_decision,
                 "agrees_with_ai": fb_agrees,
                 "adjusted_amount": fb_adj_amt,
+                "confirmed_fraud": confirmed_fraud_val,
                 "notes": fb_notes
             })
             st.success(f"Feedback logged successfully (ID: {entry['feedback_id']})")
@@ -343,12 +355,15 @@ with tab4:
 
         st.markdown("---")
         st.markdown("#### 🔄 MLOps Model Retraining Pipeline")
-        st.caption("Triggers controlled retraining incorporating verified adjuster decisions with versioning.")
+        st.caption("Triggers controlled retraining incorporating verified adjuster decisions with versioning and validation promotion gates.")
         if st.button("🚀 Trigger Model Retraining with Feedback"):
             with st.spinner("Retraining candidate model bundle with feedback signals..."):
                 retrain_res = feedback_service.trigger_retraining(claims_ml_service, min_feedback_count=1)
                 if retrain_res["status"] == "success":
-                    st.success(f"Retraining Complete! Active Model upgraded: **{retrain_res['active_version']}**")
+                    st.success(f"Retraining Complete! Active Model upgraded to **{retrain_res['active_version']}** (Brier score: {retrain_res.get('candidate_validation_brier')})")
+                    st.json(retrain_res)
+                elif retrain_res["status"] == "rejected_regression":
+                    st.warning(f"⚠️ Promotion Gate Tripped: {retrain_res['message']}")
                     st.json(retrain_res)
                 else:
                     st.info(retrain_res["message"])

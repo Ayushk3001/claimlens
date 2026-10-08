@@ -42,6 +42,7 @@ class FeedbackRequest(BaseModel):
     adjuster_decision: str = Field(..., description="Approved, Modified, Rejected, Sent to SIU")
     agrees_with_ai: bool = True
     adjusted_amount: Optional[float] = None
+    confirmed_fraud: Optional[bool] = Field(None, description="Explicit confirmation of fraud ground truth: True (confirmed fraud), False (exonerated), None (unconfirmed/pending)")
     notes: Optional[str] = ""
 
 @router.get("/health")
