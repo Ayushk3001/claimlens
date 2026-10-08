@@ -61,11 +61,12 @@ class MultiAgentClaimsWorkflow:
             if c.get("is_fraud_flagged_ground_truth"):
                 fraud_flagged_count += 1
 
+        fraud_note = f" (including {fraud_flagged_count} with historical fraud flag)" if fraud_flagged_count > 0 else ""
         summary = (
             f"Policyholder has {tenure} years of policy history with {prev_count} previous claims filed. "
             f"Claim pertains to {c_type} coverage with claimed amount ${amt:,.2f}. "
             f"Retrieved {len(similar_claims)} historical peer claims: {approved_count} approved, "
-            f"{denied_count} denied, {fraud_flagged_count} flagged for fraud."
+            f"{denied_count} denied{fraud_note}."
         )
 
         return {

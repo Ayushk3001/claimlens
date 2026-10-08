@@ -196,9 +196,10 @@ with tab1:
                 decision_badge = "badge-green" if rec["decision"] == "AUTO_APPROVE" else ("badge-yellow" if rec["decision"] == "MANUAL_ADJUSTER_REVIEW" else "badge-red")
                 st.markdown(f'**Recommended Pathway:** <span class="badge-pill {decision_badge}">{rec["decision"]}</span>', unsafe_allow_html=True)
                 st.info(f"**Action Statement:** {rec['action_statement']}")
-                st.write(f"**Recommended Payout:** {rec['recommended_payout']}")
+                safe_payout = str(rec['recommended_payout']).replace("$", r"\$")
+                st.markdown(f"**Recommended Payout:** {safe_payout}")
                 max_allowable_calc = max(0.0, claim_payload['claim_amount'] - claim_payload['deductible'])
-                st.caption(f"Financial Settlement Rule: Net allowable payout is bounded by max(0, Claim Amount - Deductible) = max(0, ${claim_payload['claim_amount']:,.2f} - ${claim_payload['deductible']:,.2f}) = **${max_allowable_calc:,.2f}**.")
+                st.caption(f"Financial Settlement Rule: Net allowable payout is bounded by max(0, Claim Amount - Deductible) = max(0, \\${claim_payload['claim_amount']:,.2f} - \\${claim_payload['deductible']:,.2f}) = **\\${max_allowable_calc:,.2f}**.")
                 st.markdown("**Actionable Settlement Checklist:**")
                 for step in rec["actionable_steps"]:
                     st.markdown(f"- [ ] {step}")

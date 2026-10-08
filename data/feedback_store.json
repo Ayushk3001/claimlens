@@ -61,5 +61,27 @@
     "confirmed_fraud": null,
     "notes": "",
     "created_at": "2026-10-08T13:15:40.387700Z"
+  },
+  {
+    "feedback_id": "FB-00007",
+    "claim_id": "CLM-0000000001",
+    "adjuster_id": "ADJ-SENIOR-TEST",
+    "adjuster_decision": "Sent to SIU",
+    "agrees_with_ai": true,
+    "adjusted_amount": 4200.0,
+    "confirmed_fraud": true,
+    "notes": "Verified intentional damage pattern.",
+    "created_at": "2026-10-08T13:53:59.155146Z"
+  },
+  {
+    "feedback_id": "FB-00008",
+    "claim_id": "CLM-0000000009",
+    "adjuster_id": "ADJ-TEST-AUDIT",
+    "adjuster_decision": "Approved",
+    "agrees_with_ai": true,
+    "adjusted_amount": 2500.0,
+    "confirmed_fraud": null,
+    "notes": "",
+    "created_at": "2026-10-08T13:54:08.726328Z"
   }
 ]
