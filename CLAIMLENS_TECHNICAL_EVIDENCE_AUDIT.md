@@ -448,29 +448,29 @@ To satisfy any independent AI/ML or insurance panelist, share the following veri
 
 ## 11. Production Refinements & Rigorous Verification (Post-Code Review)
 
-Following external technical code review, four targeted refinements were implemented and validated:
+Following external technical code review, the final production-grade MLOps corrections were implemented and validated:
 
-### 1. Retraining Safety & Promotion Gate (MLOps)
-- **Label Integrity:** SIU referrals are recognized as investigative suspicions rather than confirmed fraud ground truth. Explicit `confirmed_fraud` flag (`True`/`False`) is supported in [`FeedbackRequest`](file:///e:/prodapt/clamin/src/api/routes.py#L39-L46) and [`FeedbackService`](file:///e:/prodapt/clamin/src/services/feedback_service.py#L26-L40).
-- **80/20 Holdout Validation Split:** Replaced in-sample evaluation with an explicit stratified `train_test_split(..., test_size=0.2, stratify=y_fraud)` on augmented datasets.
-- **Automated Promotion Gate:** Both candidate and active models are evaluated on the identical holdout validation set. If candidate validation Brier score degrades (`cand_val_brier > base_val_brier + 1e-4`), promotion is automatically rejected (`status: rejected_regression`), protecting active production weights from regression.
+### 1. Strict Fraud Label Integrity (Elimination of Operational Fallback)
+- **Forensic Isolation:** Removed the implicit `elif adj_dec == "Approved": is_fraud_flagged = False` conversion in [`FeedbackService`](file:///e:/prodapt/clamin/src/services/feedback_service.py#L98-L115). In insurance operations, routine claim approvals do not prove absence of fraud (leakage prevention).
+- **Explicit Ground-Truth Requirement:** Retraining targets are strictly updated only when an explicit, verified forensic determination (`confirmed_fraud: True` or `confirmed_fraud: False`) is submitted by an investigator or auditor.
 
-### 2. Underwriting Settlement Invariants
-- **Decoupled Settlement Math:** Theoretical maximum net indemnity ceiling (`net_settlement_ceiling = max(0.0, round(claim_amount - deductible, 2))`) and authorized payable disbursement (`authorized_net_payout`) are returned as standalone structured numeric fields across all decision branches.
-- **Invariants Across Branches:**
-  - `SIU_REFERRAL`: `authorized_net_payout = $0.00` (disbursement withheld pending inquiry).
-  - `CLAIM_WITHIN_DEDUCTIBLE`: `authorized_net_payout = $0.00` (zero net indemnity).
-  - `MANUAL_ADJUSTER_REVIEW`: `0.0 <= authorized_net_payout <= net_settlement_ceiling`.
-  - `AUTO_APPROVE`: `authorized_net_payout = net_settlement_ceiling`.
+### 2. Independent Persistent Golden Benchmark Holdout Set
+- **Fair Model Promotion Evaluation:** Replaced dynamic in-sample training evaluations with a persistent, disk-frozen Golden Evaluation Benchmark Set (`data/sample_data/golden_eval_holdout.parquet`).
+- **Unbiased Gating:** The candidate model is trained strictly on the training pool, while both the active production model and candidate model are evaluated on the exact same untouched golden holdout. This eliminates in-sample evaluation advantage for the active model and ensures an apples-to-apples validation Brier score comparison.
 
-### 3. Model-Faithful Explainability
-- **Clear Attribution Provenance:** Differentiated global Gini feature importances from local instance indicators.
-- **Explicit Heuristic Labeling:** Renamed `local_feature_attributions` to `heuristic_local_feature_impact` in [`src/services/ml_models.py`](file:///e:/prodapt/clamin/src/services/ml_models.py#L193-L244) with transparent documentation that it serves as an interpretable Gini-weighted proxy indicator, distinct from exact TreeSHAP attributions.
+### 3. Atomic Artifact Promotion & Automated Rollback
+- **Zero Disk Corruption Risk:** Upgraded model promotion in [`FeedbackService.trigger_retraining`](file:///e:/prodapt/clamin/src/services/feedback_service.py#L160-L195) to write candidate bundles to temporary staging files (`.tmp`) before performing atomic file replacement via `os.replace`.
+- **Pre-Promotion Backup & Rollback:** The existing active artifact is automatically backed up to `claims_models_bundle_active.backup` prior to replacement. If in-memory hot-reloading or operating system replacement fails, the pipeline immediately rolls back to the prior production weights.
 
-### 4. Structured Numeric Settlement Validation in LLM-as-Judge
-- **Zero Regex Fragility:** Updated [`run_llm_as_judge`](file:///e:/prodapt/clamin/src/agents/multi_agent_workflow.py#L210-L275) to validate structured numeric fields (`authorized_net_payout`, `claim_amount`, `deductible`) directly.
-- **Automated Invariant Auditing:** Flags any recommendation where `authorized_net_payout > max_allowable_net`, where loss is within deductible but payout > 0, or where an SIU referral authorizes immediate cash disbursement. Regex serves solely as a secondary defense against text leakage.
+### 4. Underwriting Settlement Invariants & Authorization Governance
+- **Advisory vs. Disbursement Separation:** Clearly differentiated actuarial loss recommendations (`recommended_net_payout`) from binding financial release authority ([`payment_authorization_status`](file:///e:/prodapt/clamin/src/agents/multi_agent_workflow.py#L125-L215)):
+  - `SIU_REFERRAL`: `recommended_net_payout = $0.00`, status: `DISBURSEMENT_WITHHELD_SIU_INQUIRY`.
+  - `CLAIM_WITHIN_DEDUCTIBLE`: `recommended_net_payout = $0.00`, status: `ZERO_INDEMNITY_CLOSED`.
+  - `MANUAL_ADJUSTER_REVIEW`: `0.0 <= recommended_net_payout <= net_settlement_ceiling`, status: `PENDING_SENIOR_ADJUSTER_SIGN_OFF`.
+  - `AUTO_APPROVE`: `recommended_net_payout = net_settlement_ceiling`, status: `ELIGIBLE_FAST_TRACK_DISBURSEMENT`.
+- **Structured Numeric Evaluation in LLM Judge:** Directly evaluates numeric fields (`recommended_net_payout`, `claim_amount`, `deductible`) rather than relying on regex parsing.
 
-### Verification Status:
-- Automated test suite expanded to **21 passing tests** ([`tests/test_api.py`](file:///e:/prodapt/clamin/tests/test_api.py)).
-- All deliverables and `ClaimLens_Project_Submission.zip` regenerated and verified.
+### 5. Verification Status
+- Automated test suite expanded to **22 passing tests** ([`tests/test_api.py`](file:///e:/prodapt/clamin/tests/test_api.py)) covering label immunity, golden holdouts, atomic promotion, and invariant boundaries.
+- All capstone deliverables regenerated and packaged into [ClaimLens_Project_Submission.zip](file:///e:/prodapt/clamin/ClaimLens_Project_Submission.zip).
+

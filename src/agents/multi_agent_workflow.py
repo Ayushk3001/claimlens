@@ -120,12 +120,13 @@ class MultiAgentClaimsWorkflow:
 
         max_net_payout = max(0.0, round(amt - deductible, 2))
 
-        # Decision routing logic
+        # Decision routing logic & administrative authorization governance
         if fraud_prob >= 45.0 or (amt >= 50000 and fraud_prob >= 35.0) or risk_analysis.get("risk_tier") == "High Risk":
             decision = "SIU_REFERRAL"
             action = "Refer to Special Investigation Unit (SIU) for comprehensive anti-fraud review."
             fast_track = False
-            authorized_net_payout = 0.0
+            recommended_net = 0.0
+            auth_status = "DISBURSEMENT_WITHHELD_SIU_INQUIRY"
             payout_range = f"$0.00 (Disbursement withheld pending SIU investigation; Net ceiling: ${max_net_payout:,.2f})"
             steps = [
                 "Place automated hold on claim settlement disbursement.",
@@ -137,7 +138,8 @@ class MultiAgentClaimsWorkflow:
             decision = "CLAIM_WITHIN_DEDUCTIBLE"
             action = f"Claimed loss (${amt:,.2f}) does not exceed the applicable policy deductible (${deductible:,.2f}). Zero net indemnity due."
             fast_track = True
-            authorized_net_payout = 0.0
+            recommended_net = 0.0
+            auth_status = "ZERO_INDEMNITY_CLOSED"
             payout_range = "$0.00 (Loss within deductible)"
             steps = [
                 f"Verify incident damage assessment (${amt:,.2f}) against applicable policy deductible (${deductible:,.2f}).",
@@ -148,12 +150,13 @@ class MultiAgentClaimsWorkflow:
             decision = "MANUAL_ADJUSTER_REVIEW"
             action = "Assign to Senior Claims Adjuster for detailed estimate audit."
             fast_track = False
+            auth_status = "PENDING_SENIOR_ADJUSTER_SIGN_OFF"
 
             # Bounded net settlement range: never exceeds (claim_amount - deductible)
             est_base_loss = min(amt, predicted_amt)
             lower_net = max(0.0, round(est_base_loss * 0.85 - deductible, 2))
             upper_net = max(lower_net, round(min(max_net_payout, est_base_loss - deductible), 2))
-            authorized_net_payout = upper_net
+            recommended_net = upper_net
 
             if lower_net >= upper_net or upper_net == 0.0:
                 payout_range = f"${max_net_payout:,.2f}"
@@ -185,7 +188,8 @@ class MultiAgentClaimsWorkflow:
             decision = "AUTO_APPROVE"
             action = "Eligible for Fast-Track Automated Settlement."
             fast_track = True
-            authorized_net_payout = max_net_payout
+            recommended_net = max_net_payout
+            auth_status = "ELIGIBLE_FAST_TRACK_DISBURSEMENT"
             payout_range = f"${max_net_payout:,.2f}"
             steps = [
                 f"Apply policy deductible of ${deductible:,.2f} to claimed loss of ${amt:,.2f}.",
@@ -213,7 +217,9 @@ class MultiAgentClaimsWorkflow:
             "action_statement": action,
             "fast_track_eligible": fast_track,
             "net_settlement_ceiling": max_net_payout,
-            "authorized_net_payout": authorized_net_payout,
+            "recommended_net_payout": recommended_net,
+            "authorized_net_payout": recommended_net,  # Maintained as backward-compatible alias
+            "payment_authorization_status": auth_status,
             "recommended_payout": payout_range,
             "actionable_steps": steps,
             "executive_rationale": llm_reasoning or f"Based on {risk_analysis.get('risk_tier')} profile and {investigation.get('findings')}, {action}"
