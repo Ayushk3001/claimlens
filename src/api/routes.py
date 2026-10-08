@@ -50,7 +50,7 @@ def health_check():
     """System health check and component status."""
     return {
         "status": "healthy",
-        "service": "AI-Powered Insurance Claims Assistant",
+        "service": "ClaimLens — AI-Powered Insurance Claims Assistant",
         "vector_store_indexed_count": hybrid_retriever.vector_store.count(),
         "ml_models_ready": claims_ml_service.is_trained
     }

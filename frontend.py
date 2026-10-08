@@ -13,7 +13,7 @@ from src.utils.data_loader import load_claims_dataset
 
 # Set Page Config
 st.set_page_config(
-    page_title="AI Insurance Claims Assistant",
+    page_title="ClaimLens — AI-Powered Insurance Claims Assistant",
     page_icon="🛡️",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -87,7 +87,7 @@ if st.sidebar.button("🎲 Load Random Claim Sample"):
     st.sidebar.success(f"Loaded: {st.session_state['claim_id']}")
 
 # Title Banner
-st.markdown('<div class="main-title">🛡️ AI-Powered Insurance Claims Assistant</div>', unsafe_allow_html=True)
+st.markdown('<div class="main-title">🛡️ ClaimLens — AI-Powered Insurance Claims Assistant</div>', unsafe_allow_html=True)
 st.markdown('<div class="sub-title">Intelligent Triage, Hybrid RAG Historical Precedents, Multi-Agent Workflow, and Explainable Risk Prediction</div>', unsafe_allow_html=True)
 
 # Top Navigation Tabs
@@ -174,36 +174,39 @@ with tab1:
             m3.metric("Fraud Risk Score", f"{risk['fraud_probability_percent']}%")
             m4.metric("LLM-as-Judge Score", f"{judge['overall_quality_score']} / 10.0")
 
+            # Helper to prevent KaTeX LaTeX math mode from corrupting currency text
+            def safe_txt(t):
+                return str(t).replace("$", r"\$")
+
             # Agent 1: Investigation
             with st.expander("🕵️ Agent 1: Investigation Findings", expanded=True):
                 inv = workflow_out["investigation"]
-                st.write(inv["findings"])
+                st.markdown(safe_txt(inv["findings"]))
                 if inv["key_precedents"]:
                     st.markdown("**Historical Precedent Clustered Claims:**")
                     for p in inv["key_precedents"]:
-                        st.markdown(f"- `{p}`")
+                        st.markdown(f"- `{safe_txt(p)}`")
 
             # Agent 2: Risk Assessment
             with st.expander("⚠️ Agent 2: Risk & Fraud Assessment", expanded=True):
-                st.write(risk["risk_narrative"])
+                st.markdown(safe_txt(risk["risk_narrative"]))
                 st.markdown("**Primary Risk Indicators:**")
                 for rd in risk["risk_drivers"]:
                     st.markdown(f"- 🔴 {rd}")
-                st.caption("Provenance: Scikit-Learn RandomForestClassifier (100 estimators) trained on 5,000 ground-truth labels from Hugging Face FreeInsuranceClaims100M.")
+                st.caption("Provenance: Scikit-Learn RandomForestClassifier (80 estimators, 5-fold Platt calibration) trained on 5,000 ground-truth labels from Hugging Face FreeInsuranceClaims100M.")
 
             # Agent 3: Final Handling Recommendation
             with st.expander("📋 Agent 3: Actionable Recommendation", expanded=True):
                 decision_badge = "badge-green" if rec["decision"] == "AUTO_APPROVE" else ("badge-yellow" if rec["decision"] == "MANUAL_ADJUSTER_REVIEW" else "badge-red")
                 st.markdown(f'**Recommended Pathway:** <span class="badge-pill {decision_badge}">{rec["decision"]}</span>', unsafe_allow_html=True)
-                st.info(f"**Action Statement:** {rec['action_statement']}")
-                safe_payout = str(rec['recommended_payout']).replace("$", r"\$")
-                st.markdown(f"**Recommended Payout:** {safe_payout}")
+                st.info(f"**Action Statement:** {safe_txt(rec['action_statement'])}")
+                st.markdown(f"**Recommended Payout:** {safe_txt(rec['recommended_payout'])}")
                 max_allowable_calc = max(0.0, claim_payload['claim_amount'] - claim_payload['deductible'])
                 st.caption(f"Financial Settlement Rule: Net allowable payout is bounded by max(0, Claim Amount - Deductible) = max(0, \\${claim_payload['claim_amount']:,.2f} - \\${claim_payload['deductible']:,.2f}) = **\\${max_allowable_calc:,.2f}**.")
                 st.markdown("**Actionable Settlement Checklist:**")
                 for step in rec["actionable_steps"]:
-                    st.markdown(f"- [ ] {step}")
-                st.markdown(f"**Executive Synthesis:** *{rec['executive_rationale']}*")
+                    st.markdown(f"- [ ] {safe_txt(step)}")
+                st.markdown(f"**Executive Synthesis:** *{safe_txt(rec['executive_rationale'])}*")
 
             # LLM-as-Judge Card
             with st.expander("⚖️ Independent LLM-as-Judge Quality Audit", expanded=True):

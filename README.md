@@ -1,6 +1,6 @@
-# AI-Powered Insurance Claims Assistant
+# 🛡️ ClaimLens — AI-Powered Insurance Claims Assistant
 
-An intelligent, production-ready Insurance Claims Decisioning System built for Property & Casualty (P&C) carriers. Combines **Hybrid RAG Retrieval (Vector + BM25)**, **Autonomous Multi-Agent Orchestration**, and **Explainable Predictive Machine Learning** to streamline claims investigation, triage complexity, calculate settlement estimates, detect fraud risk, and assist human adjusters.
+**ClaimLens** is an intelligent, production-ready Insurance Claims Decisioning System built for Property & Casualty (P&C) carriers. Combines **Hybrid RAG Retrieval (Vector + BM25)**, **Autonomous Multi-Agent Orchestration**, and **Explainable Predictive Machine Learning** to streamline claims investigation, triage complexity, calculate settlement estimates, detect fraud risk, and assist human adjusters.
 
 ---
 

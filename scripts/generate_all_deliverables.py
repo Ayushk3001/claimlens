@@ -53,7 +53,7 @@ def generate_architecture_diagram():
     )
 
     story = [
-        Paragraph("AI-Powered Insurance Claims Assistant — Architecture Diagram", title_style),
+        Paragraph("ClaimLens — Architecture Diagram", title_style),
         Paragraph("<b>End-to-End System Architecture:</b> Dataset Ingestion &rarr; Hybrid RAG &rarr; Multi-Agent Workflow &rarr; Microservice API &rarr; UI &rarr; Evaluation", body_style),
         Spacer(1, 15)
     ]
@@ -147,8 +147,8 @@ def generate_design_document():
     bullet = ParagraphStyle('Bullet', parent=body, leftIndent=15, bulletIndent=5, spaceAfter=3)
 
     story = [
-        Paragraph("AI-Powered Insurance Claims Assistant — Design Document", ParagraphStyle('DocTitle', parent=styles['Title'], fontSize=20, leading=24, textColor=colors.HexColor('#1E3A8A'))),
-        Paragraph("<b>Author:</b> Capstone Project Candidate | <b>Domain:</b> Property & Casualty Insurance (P&C) | <b>Version:</b> 1.0.0", body),
+        Paragraph("ClaimLens — Design Document", ParagraphStyle('DocTitle', parent=styles['Title'], fontSize=20, leading=24, textColor=colors.HexColor('#1E3A8A'))),
+        Paragraph("<b>Author:</b> Capstone Project Candidate | <b>System:</b> ClaimLens | <b>Domain:</b> Property & Casualty Insurance (P&C) | <b>Version:</b> 1.0.0", body),
         Spacer(1, 10),
 
         Paragraph("1. Problem Statement", h1),
@@ -229,13 +229,13 @@ def generate_api_documentation():
     code_block = ParagraphStyle('Code', parent=styles['Code'], fontSize=7.5, leading=10, textColor=colors.HexColor('#0F172A'), backColor=colors.HexColor('#F1F5F9'))
 
     story = [
-        Paragraph("AI-Powered Insurance Claims Assistant — API Documentation", ParagraphStyle('DocTitle', parent=styles['Title'], fontSize=18, leading=22, textColor=colors.HexColor('#1E3A8A'))),
+        Paragraph("ClaimLens — API Documentation", ParagraphStyle('DocTitle', parent=styles['Title'], fontSize=18, leading=22, textColor=colors.HexColor('#1E3A8A'))),
         Paragraph("<b>Base URL:</b> <code>http://127.0.0.1:8000/api/v1</code> | <b>Interactive OpenAPI Docs:</b> <code>http://127.0.0.1:8000/docs</code>", body),
         Spacer(1, 8),
 
         Paragraph("1. Health Check Endpoint", h1),
         Paragraph("<b>GET /health</b> — Returns system readiness, vector index count, and model initialization status.", body),
-        Paragraph("<b>Sample Response:</b><br/><code>{\"status\": \"healthy\", \"service\": \"AI-Powered Insurance Claims Assistant\", \"vector_store_indexed_count\": 500, \"ml_models_ready\": true}</code>", code_block),
+        Paragraph("<b>Sample Response:</b><br/><code>{\"status\": \"healthy\", \"service\": \"ClaimLens — AI-Powered Insurance Claims Assistant\", \"vector_store_indexed_count\": 500, \"ml_models_ready\": true}</code>", code_block),
 
         Paragraph("2. Input Validation Guardrails", h1),
         Paragraph("<b>POST /claims/validate</b> — Validates claim schema, range constraints, and sanitizes prompt injections.", body),
@@ -278,7 +278,7 @@ def generate_dataset_details():
     body = ParagraphStyle('Body', parent=styles['Normal'], fontSize=9, leading=13, textColor=colors.HexColor('#334155'), spaceAfter=5)
 
     story = [
-        Paragraph("AI-Powered Insurance Claims Assistant — Dataset Details", ParagraphStyle('DocTitle', parent=styles['Title'], fontSize=18, leading=22, textColor=colors.HexColor('#1E3A8A'))),
+        Paragraph("ClaimLens — Dataset Details", ParagraphStyle('DocTitle', parent=styles['Title'], fontSize=18, leading=22, textColor=colors.HexColor('#1E3A8A'))),
         Paragraph("<b>Dataset Reference & Preprocessing Specification</b>", body),
         Spacer(1, 10),
 
@@ -342,7 +342,7 @@ def generate_evaluation_report():
     body = ParagraphStyle('Body', parent=styles['Normal'], fontSize=9, leading=13, textColor=colors.HexColor('#334155'), spaceAfter=5)
 
     story = [
-        Paragraph("AI-Powered Insurance Claims Assistant — Evaluation Report", ParagraphStyle('DocTitle', parent=styles['Title'], fontSize=18, leading=22, textColor=colors.HexColor('#1E3A8A'))),
+        Paragraph("ClaimLens — Evaluation Report", ParagraphStyle('DocTitle', parent=styles['Title'], fontSize=18, leading=22, textColor=colors.HexColor('#1E3A8A'))),
         Paragraph("<b>Evaluation Framework: DeepEval & LLM-as-Judge Benchmark Results</b>", body),
         Spacer(1, 10),
 
@@ -416,7 +416,7 @@ def generate_presentation_deck():
 
     blank_layout = prs.slide_layouts[6]
 
-    def add_header(slide, title_text, category_text="CAPSTONE PROJECT: AI-POWERED INSURANCE CLAIMS ASSISTANT"):
+    def add_header(slide, title_text, category_text="CAPSTONE PROJECT: CLAIMLENS AI CLAIMS ASSISTANT"):
         top_bar = slide.shapes.add_shape(1, Inches(0), Inches(0), Inches(13.333), Inches(1.1))
         top_bar.fill.solid()
         top_bar.fill.fore_color.rgb = RGBColor(30, 58, 138)
@@ -474,7 +474,7 @@ def generate_presentation_deck():
     tf1.word_wrap = True
     
     p_t1 = tf1.paragraphs[0]
-    p_t1.text = "AI-Powered Insurance Claims Assistant"
+    p_t1.text = "ClaimLens: AI-Powered Insurance Claims Assistant"
     p_t1.font.size = Pt(40)
     p_t1.font.bold = True
     p_t1.font.color.rgb = RGBColor(255, 255, 255)

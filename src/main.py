@@ -24,7 +24,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
-    description="AI-Powered Insurance Claims Assistant providing Hybrid RAG search, Multi-Agent workflow, ML risk predictions, and DeepEval evaluation.",
+    description="ClaimLens — AI-Powered Insurance Claims Assistant providing Hybrid RAG search, Multi-Agent workflow, ML risk predictions, and financial settlement governance.",
     version=settings.VERSION,
     lifespan=lifespan,
     docs_url="/docs",
