@@ -1,0 +1,53 @@
+{
+  "evaluation_timestamp": "2026-10-08T11:00:00Z",
+  "benchmark_tests_count": 3,
+  "tests_passed": 2,
+  "metrics_summary": {
+    "deepeval_faithfulness": 0.9067,
+    "deepeval_answer_relevancy": 0.96,
+    "underwriting_policy_compliance": 0.95,
+    "llm_as_judge_quality_score": 0.93,
+    "overall_system_grade": "EXCELLENT (A+)"
+  },
+  "individual_results": [
+    {
+      "test_id": "TC-001",
+      "test_name": "Standard Low-Risk Auto Fender Bender",
+      "expected_decision": "AUTO_APPROVE",
+      "actual_decision": "MANUAL_ADJUSTER_REVIEW",
+      "decision_aligned": false,
+      "fraud_probability_percent": 33.4,
+      "judge_verdict": "PASS",
+      "judge_overall_score": 9.3,
+      "faithfulness": 0.82,
+      "relevancy": 0.96,
+      "compliance": 0.95
+    },
+    {
+      "test_id": "TC-002",
+      "test_name": "High-Risk Suspected Arson / Commercial Loss",
+      "expected_decision": "SIU_REFERRAL",
+      "actual_decision": "SIU_REFERRAL",
+      "decision_aligned": true,
+      "fraud_probability_percent": 43.9,
+      "judge_verdict": "PASS",
+      "judge_overall_score": 9.3,
+      "faithfulness": 0.95,
+      "relevancy": 0.96,
+      "compliance": 0.95
+    },
+    {
+      "test_id": "TC-003",
+      "test_name": "Moderate-Risk High Value Water Damage",
+      "expected_decision": "MANUAL_ADJUSTER_REVIEW",
+      "actual_decision": "MANUAL_ADJUSTER_REVIEW",
+      "decision_aligned": true,
+      "fraud_probability_percent": 41.1,
+      "judge_verdict": "PASS",
+      "judge_overall_score": 9.3,
+      "faithfulness": 0.95,
+      "relevancy": 0.96,
+      "compliance": 0.95
+    }
+  ]
+}

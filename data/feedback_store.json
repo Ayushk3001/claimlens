@@ -1,0 +1,22 @@
+[
+  {
+    "feedback_id": "FB-00001",
+    "claim_id": "CLM-0000000001",
+    "adjuster_id": "ADJ-SENIOR-TEST",
+    "adjuster_decision": "Sent to SIU",
+    "agrees_with_ai": true,
+    "adjusted_amount": 4200.0,
+    "notes": "Verified intentional damage pattern.",
+    "created_at": "2026-10-08T12:29:05.212732Z"
+  },
+  {
+    "feedback_id": "FB-00002",
+    "claim_id": "CLM-0000000001",
+    "adjuster_id": "ADJ-SENIOR-TEST",
+    "adjuster_decision": "Sent to SIU",
+    "agrees_with_ai": true,
+    "adjusted_amount": 4200.0,
+    "notes": "Verified intentional damage pattern.",
+    "created_at": "2026-10-08T12:30:37.439778Z"
+  }
+]
