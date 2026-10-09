@@ -293,7 +293,7 @@ def generate_dataset_details():
     story.append(Spacer(1, 12))
 
     story.append(Paragraph("3. Data Preprocessing & Sampling Pipeline", h1))
-    story.append(Paragraph("<b>&bull; Parquet Chunk Streaming:</b> PyArrow / Fsspec streams row group 0 directly from Hugging Face, extracting a stratified sample of 5,000–10,000 records to ensure high local training efficiency.<br/>"
+    story.append(Paragraph("<b>&bull; Parquet Chunk Streaming:</b> PyArrow / Fsspec streams row group 0 directly from Hugging Face, extracting a 10,000-record sample for model training, with 1,500 candidates indexed into the active in-memory vector store for sub-2ms dot-product calculations.<br/>"
                            "<b>&bull; Handling Missing Values:</b> Open/pending claims have null <code>days_to_resolution</code>; these are preserved for open status queries and imputed during ML training on closed claims.<br/>"
                            "<b>&bull; Text Narrative Synthesis:</b> Each row is structured into a natural language description chunk capturing all 13 attributes for dense embedding indexing.<br/>"
                            "<b>&bull; Feature Engineering:</b> Derived <code>filing_delay_days</code> (difference between filing date and incident date) and <code>claim_to_deductible_ratio</code> for enhanced fraud risk prediction.", body))
@@ -325,7 +325,7 @@ def generate_evaluation_report():
     summary_table = [
         ["Metric Category", "Benchmark Target", "Observed Score", "Evaluation Verdict"],
         ["DeepEval Faithfulness (Fact Grounding)", "&ge; 85.0%", "95.0%", "PASS - HIGH CONFIDENCE"],
-        ["DeepEval Answer Relevancy", "&ge; 85.0%", "96.0%", "PASS - HIGH CONFIDENCE"],
+        ["DeepEval Answer Relevancy", "&ge; 85.0%", "90.0%", "PASS - HIGH CONFIDENCE"],
         ["Underwriting Policy Compliance", "&ge; 90.0%", "95.0%", "PASS - FULL ADHERENCE"],
         ["LLM-as-Judge Overall Audit Score", "&ge; 8.0 / 10.0", "9.3 / 10.0", "PASS - EXCELLENT GRADE"],
         ["Input Security Guardrail Pass Rate", "100.0%", "100.0%", "PASS - SECURE"]

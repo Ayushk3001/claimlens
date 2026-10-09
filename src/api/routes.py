@@ -65,7 +65,7 @@ def validate_claim(payload: ClaimInputRequest):
 
 @router.post("/claims/hybrid-search")
 def search_similar_claims(payload: HybridSearchRequest):
-    """Retrieve similar historical claims using Hybrid Search (ChromaDB Vector + BM25) with metadata filtering."""
+    """Retrieve similar historical claims using Hybrid Search (In-Memory NumPy Vector Store + BM25Okapi) with metadata filtering."""
     results = hybrid_retriever.search(
         query=payload.query,
         top_k=payload.top_k,

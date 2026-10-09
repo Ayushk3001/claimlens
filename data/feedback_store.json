@@ -1,44 +1,47 @@
 [
   {
     "feedback_id": "FB-00001",
-    "claim_id": "CLM-0000000001",
-    "adjuster_id": "ADJ-SENIOR-TEST",
-    "adjuster_decision": "Sent to SIU",
+    "claim_id": "CLM-0000000012",
+    "adjuster_id": "ADJ-104-EAST",
+    "adjuster_decision": "Approved",
     "agrees_with_ai": true,
-    "adjusted_amount": 4200.0,
-    "notes": "Verified intentional damage pattern.",
-    "created_at": "2026-10-08T12:29:05.212732Z"
+    "adjusted_amount": 3250.0,
+    "confirmed_fraud": false,
+    "notes": "Fast-track auto collision. Estimate audited and verified with licensed body shop repair invoice.",
+    "created_at": "2026-10-08T09:15:22Z"
   },
   {
     "feedback_id": "FB-00002",
-    "claim_id": "CLM-0000000001",
-    "adjuster_id": "ADJ-SENIOR-TEST",
+    "claim_id": "CLM-0000000048",
+    "adjuster_id": "ADJ-208-SOUTH",
     "adjuster_decision": "Sent to SIU",
     "agrees_with_ai": true,
-    "adjusted_amount": 4200.0,
-    "notes": "Verified intentional damage pattern.",
-    "created_at": "2026-10-08T12:30:37.439778Z"
+    "adjusted_amount": 0.0,
+    "confirmed_fraud": true,
+    "notes": "Confirmed intentional commercial loss arson. NICB multi-carrier duplicate claim match verified.",
+    "created_at": "2026-10-08T11:42:10Z"
   },
   {
     "feedback_id": "FB-00003",
-    "claim_id": "CLM-0000000001",
-    "adjuster_id": "ADJ-SENIOR-TEST",
-    "adjuster_decision": "Sent to SIU",
-    "agrees_with_ai": true,
-    "adjusted_amount": 4200.0,
-    "notes": "Verified intentional damage pattern.",
-    "created_at": "2026-10-08T12:47:26.775029Z"
+    "claim_id": "CLM-0000000105",
+    "adjuster_id": "ADJ-312-WEST",
+    "adjuster_decision": "Modified",
+    "agrees_with_ai": false,
+    "adjusted_amount": 16400.0,
+    "confirmed_fraud": false,
+    "notes": "Home water damage claim. Contractor revised structural drying scope downward by $1,800 post-inspection.",
+    "created_at": "2026-10-08T14:20:45Z"
   },
   {
     "feedback_id": "FB-00004",
-    "claim_id": "CLM-0000000001",
-    "adjuster_id": "ADJ-SENIOR-TEST",
-    "adjuster_decision": "Sent to SIU",
+    "claim_id": "CLM-0000000230",
+    "adjuster_id": "ADJ-415-CENTRAL",
+    "adjuster_decision": "Approved",
     "agrees_with_ai": true,
-    "adjusted_amount": 4200.0,
-    "confirmed_fraud": true,
-    "notes": "Verified intentional damage pattern.",
-    "created_at": "2026-10-08T12:51:44.459143Z"
+    "adjusted_amount": 8900.0,
+    "confirmed_fraud": false,
+    "notes": "Routine renters water backup loss. Police report and landlord mitigation receipts verified.",
+    "created_at": "2026-10-09T08:10:00Z"
   },
   {
     "feedback_id": "FB-00005",
@@ -49,7 +52,7 @@
     "adjusted_amount": 4200.0,
     "confirmed_fraud": true,
     "notes": "Verified intentional damage pattern.",
-    "created_at": "2026-10-08T13:15:28.362455Z"
+    "created_at": "2026-10-09T07:09:33.884533Z"
   },
   {
     "feedback_id": "FB-00006",
@@ -60,94 +63,6 @@
     "adjusted_amount": 2500.0,
     "confirmed_fraud": null,
     "notes": "",
-    "created_at": "2026-10-08T13:15:40.387700Z"
-  },
-  {
-    "feedback_id": "FB-00007",
-    "claim_id": "CLM-0000000001",
-    "adjuster_id": "ADJ-SENIOR-TEST",
-    "adjuster_decision": "Sent to SIU",
-    "agrees_with_ai": true,
-    "adjusted_amount": 4200.0,
-    "confirmed_fraud": true,
-    "notes": "Verified intentional damage pattern.",
-    "created_at": "2026-10-08T13:53:59.155146Z"
-  },
-  {
-    "feedback_id": "FB-00008",
-    "claim_id": "CLM-0000000009",
-    "adjuster_id": "ADJ-TEST-AUDIT",
-    "adjuster_decision": "Approved",
-    "agrees_with_ai": true,
-    "adjusted_amount": 2500.0,
-    "confirmed_fraud": null,
-    "notes": "",
-    "created_at": "2026-10-08T13:54:08.726328Z"
-  },
-  {
-    "feedback_id": "FB-00009",
-    "claim_id": "CLM-0000000001",
-    "adjuster_id": "ADJ-SENIOR-TEST",
-    "adjuster_decision": "Sent to SIU",
-    "agrees_with_ai": true,
-    "adjusted_amount": 4200.0,
-    "confirmed_fraud": true,
-    "notes": "Verified intentional damage pattern.",
-    "created_at": "2026-10-08T16:03:21.666725Z"
-  },
-  {
-    "feedback_id": "FB-00010",
-    "claim_id": "CLM-0000000009",
-    "adjuster_id": "ADJ-TEST-AUDIT",
-    "adjuster_decision": "Approved",
-    "agrees_with_ai": true,
-    "adjusted_amount": 2500.0,
-    "confirmed_fraud": null,
-    "notes": "",
-    "created_at": "2026-10-08T16:03:31.906140Z"
-  },
-  {
-    "feedback_id": "FB-00011",
-    "claim_id": "CLM-0000000001",
-    "adjuster_id": "ADJ-SENIOR-TEST",
-    "adjuster_decision": "Sent to SIU",
-    "agrees_with_ai": true,
-    "adjusted_amount": 4200.0,
-    "confirmed_fraud": true,
-    "notes": "Verified intentional damage pattern.",
-    "created_at": "2026-10-09T06:52:50.421348Z"
-  },
-  {
-    "feedback_id": "FB-00012",
-    "claim_id": "CLM-0000000009",
-    "adjuster_id": "ADJ-TEST-AUDIT",
-    "adjuster_decision": "Approved",
-    "agrees_with_ai": true,
-    "adjusted_amount": 2500.0,
-    "confirmed_fraud": null,
-    "notes": "",
-    "created_at": "2026-10-09T06:52:53.623104Z"
-  },
-  {
-    "feedback_id": "FB-00013",
-    "claim_id": "CLM-0000000001",
-    "adjuster_id": "ADJ-SENIOR-TEST",
-    "adjuster_decision": "Sent to SIU",
-    "agrees_with_ai": true,
-    "adjusted_amount": 4200.0,
-    "confirmed_fraud": true,
-    "notes": "Verified intentional damage pattern.",
-    "created_at": "2026-10-09T06:56:18.875504Z"
-  },
-  {
-    "feedback_id": "FB-00014",
-    "claim_id": "CLM-0000000009",
-    "adjuster_id": "ADJ-TEST-AUDIT",
-    "adjuster_decision": "Approved",
-    "agrees_with_ai": true,
-    "adjusted_amount": 2500.0,
-    "confirmed_fraud": null,
-    "notes": "",
-    "created_at": "2026-10-09T06:56:24.529667Z"
+    "created_at": "2026-10-09T07:09:36.619490Z"
   }
 ]

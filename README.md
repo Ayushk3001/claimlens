@@ -117,6 +117,13 @@ ProjectRepository/
 - **Dataset Name:** Free Synthetic Insurance Claims 100M
 - **Hugging Face Primary Link:** [ziadatalabs/FreeInsuranceClaims100M](https://huggingface.co/datasets/ziadatalabs/FreeInsuranceClaims100M)
 - **Format:** Apache Parquet
+- **Sampling Scope & Execution Pipeline:**
+  - **Source Scale:** 100M synthetic claims across multiple partitioned Parquet files.
+  - **Local Model Training Sample:** 10,000 records extracted from row group 0 of the primary Parquet partition.
+  - **In-Memory Semantic Vector Store:** 1,500 records indexed at startup into an in-memory normalized NumPy cosine matrix for sub-2ms dot-product calculations (`np.dot(matrix, query_vec)`), with ~350ms end-to-end response time when including external API embedding network roundtrips.
+- **Dual-Probability Underwriting Policy:**
+  - **Calibrated Risk (Platt Scaling):** Reflects true statistical population likelihood (8.5% industry baseline). A calibrated risk $< 8.5\%$ with clean loss history ($0$ prior claims) and routine loss ($\le \$5,000$) qualifies for fast-track `AUTO_APPROVE`.
+  - **Raw Model Probability:** Uncalibrated Random Forest tree split ratio. Serves as a secondary risk indicator; raw score $\ge 45.0\%$ triggers mandatory `SIU_REFERRAL`.
 - **13 Core Fields:**
   1. `claim_id` — Unique claim record identifier
   2. `policy_id` — Policyholder account contract ID

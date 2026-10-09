@@ -34,21 +34,21 @@ class HybridRetriever:
         if not self.is_initialized:
             self.initialize()
 
-        # Build ChromaDB metadata filter where possible
-        chroma_filter = {}
+        # Build vector store metadata filter where possible
+        metadata_filter = {}
         if claim_type:
-            chroma_filter["claim_type"] = claim_type.capitalize()
+            metadata_filter["claim_type"] = claim_type.capitalize()
         if state:
-            chroma_filter["state"] = state.upper()
+            metadata_filter["state"] = state.upper()
         if claim_status:
-            chroma_filter["claim_status"] = claim_status.capitalize()
+            metadata_filter["claim_status"] = claim_status.capitalize()
 
         # Retrieve top candidates from both search methods
         candidate_k = max(top_k * 3, 20)
         semantic_results = self.vector_store.search(
             query=query,
             top_k=candidate_k,
-            where_filter=chroma_filter if chroma_filter else None
+            where_filter=metadata_filter if metadata_filter else None
         )
         
         keyword_results = self.keyword_search.search(

@@ -1,10 +1,12 @@
 {
-  "evaluation_timestamp": "2026-10-08T11:00:00Z",
+  "evaluation_timestamp": "2026-10-09T07:04:49Z",
+  "evaluation_framework": "DeepEval & LLM-as-Judge Benchmark",
   "benchmark_tests_count": 3,
   "tests_passed": 3,
+  "pass_rate_percent": 100.0,
   "metrics_summary": {
     "deepeval_faithfulness": 0.95,
-    "deepeval_answer_relevancy": 0.96,
+    "deepeval_answer_relevancy": 0.9,
     "underwriting_policy_compliance": 0.95,
     "llm_as_judge_quality_score": 0.93,
     "overall_system_grade": "EXCELLENT (A+)"
@@ -16,11 +18,15 @@
       "expected_decision": "AUTO_APPROVE",
       "actual_decision": "AUTO_APPROVE",
       "decision_aligned": true,
-      "fraud_probability_percent": 35.0,
+      "raw_fraud_probability_percent": 35.0,
+      "calibrated_fraud_probability_percent": 6.1,
+      "probability_constraints_passed": true,
+      "probability_constraint_notes": [],
       "judge_verdict": "PASS",
       "judge_overall_score": 9.3,
+      "test_passed": true,
       "faithfulness": 0.95,
-      "relevancy": 0.96,
+      "relevancy": 0.9,
       "compliance": 0.95
     },
     {
@@ -29,11 +35,15 @@
       "expected_decision": "SIU_REFERRAL",
       "actual_decision": "SIU_REFERRAL",
       "decision_aligned": true,
-      "fraud_probability_percent": 46.4,
+      "raw_fraud_probability_percent": 46.4,
+      "calibrated_fraud_probability_percent": 8.1,
+      "probability_constraints_passed": true,
+      "probability_constraint_notes": [],
       "judge_verdict": "PASS",
       "judge_overall_score": 9.3,
+      "test_passed": true,
       "faithfulness": 0.95,
-      "relevancy": 0.96,
+      "relevancy": 0.9,
       "compliance": 0.95
     },
     {
@@ -42,11 +52,15 @@
       "expected_decision": "MANUAL_ADJUSTER_REVIEW",
       "actual_decision": "MANUAL_ADJUSTER_REVIEW",
       "decision_aligned": true,
-      "fraud_probability_percent": 43.5,
+      "raw_fraud_probability_percent": 43.5,
+      "calibrated_fraud_probability_percent": 7.9,
+      "probability_constraints_passed": true,
+      "probability_constraint_notes": [],
       "judge_verdict": "PASS",
       "judge_overall_score": 9.3,
+      "test_passed": true,
       "faithfulness": 0.95,
-      "relevancy": 0.96,
+      "relevancy": 0.9,
       "compliance": 0.95
     }
   ]

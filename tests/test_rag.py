@@ -34,16 +34,26 @@ def test_keyword_search_with_state_filter():
 
 def test_hybrid_search_metadata_amount_and_prev_claims_filtering():
     hybrid_retriever.initialize(max_records=500)
+    # Test valid inclusion matching
     results = hybrid_retriever.search(
-        query="storm water damage claim",
+        query="damage repair loss claim",
         top_k=5,
-        min_amount=1000.0,
-        max_amount=25000.0,
-        max_prev_claims=2
+        min_amount=500.0,
+        max_amount=50000.0,
+        max_prev_claims=3
     )
     assert isinstance(results, list)
+    assert len(results) > 0, "Expected non-empty result set for standard bounds"
     for r in results:
         amt = float(r["claim_amount"])
-        assert 1000.0 <= amt <= 25000.0, f"Claim amount {amt} violated [1000, 25000] bounds"
+        assert 500.0 <= amt <= 50000.0, f"Claim amount {amt} violated [500, 50000] bounds"
         prev_count = int(r["previous_claims_count"])
-        assert prev_count <= 2, f"Prior claims count {prev_count} exceeded limit of 2"
+        assert prev_count <= 3, f"Prior claims count {prev_count} exceeded limit of 3"
+
+    # Test strict exclusion: impossibly low maximum amount excludes all records
+    excluded_results = hybrid_retriever.search(
+        query="severe loss claim",
+        top_k=5,
+        min_amount=1000000.0  # $1,000,000 floor exceeds all sample claims
+    )
+    assert len(excluded_results) == 0, "Expected zero results for $1M min_amount exclusion test"
