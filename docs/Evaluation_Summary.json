@@ -1,5 +1,5 @@
 {
-  "evaluation_timestamp": "2026-10-09T09:20:08Z",
+  "evaluation_timestamp": "2026-10-09T10:01:42Z",
   "evaluation_framework": "LLM-as-Judge & Deterministic Invariant Auditing",
   "methodology_notes": "Scores are derived directly from the multi-agent LLM Judge evaluation dimensions (factual consistency, completeness, and underwriting policy compliance) combined with deterministic financial invariant validation. Metric values are validated for finite range [0.0, 10.0]. No static fallback scores or simulated DeepEval proxies are utilized.",
   "benchmark_tests_count": 3,

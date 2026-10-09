@@ -112,13 +112,8 @@ class MultiAgentClaimsWorkflow:
         c_type = str(claim_data.get("claim_type", "Auto")).capitalize()
 
         # Strict Insurance Settlement Invariants:
-        # 1. Theoretical Maximum Net Settlement Ceiling = max(0, Claim Amount - Applicable Deductible)
-        # 2. Authorized Payable Net Payout = Actual authorized cash disbursement (strictly <= ceiling)
-        amt = float(claim_data.get("claim_amount", 0))
-        deductible = float(claim_data.get("deductible", 500))
-        predicted_amt = ml_results.get("predicted_claim_amount", amt)
-        c_type = str(claim_data.get("claim_type", "Auto")).capitalize()
-
+        prev_claims = int(claim_data.get("previous_claims_count", 0))
+        tenure = float(claim_data.get("policyholder_tenure_years", 1.0))
         max_net_payout = max(0.0, round(amt - deductible, 2))
 
         # Decision routing logic & administrative authorization governance
@@ -147,7 +142,13 @@ class MultiAgentClaimsWorkflow:
                 "Notify policyholder that covered repair costs are absorbed within the elected deductible limit.",
                 "Close file with zero indemnity disbursement issued."
             ]
-        elif amt > 10000 or fraud_prob >= 38.0 or risk_analysis.get("risk_tier") in ["Moderate Risk", "High Risk"]:
+        elif (
+            amt > 5000.0
+            or prev_claims > 0
+            or tenure < 1.0
+            or fraud_prob >= 38.0
+            or risk_analysis.get("risk_tier") in ["Moderate Risk", "High Risk"]
+        ):
             decision = "MANUAL_ADJUSTER_REVIEW"
             action = "Assign to Senior Claims Adjuster for detailed estimate audit."
             fast_track = False
