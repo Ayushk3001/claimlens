@@ -122,7 +122,7 @@ class MultiAgentClaimsWorkflow:
         max_net_payout = max(0.0, round(amt - deductible, 2))
 
         # Decision routing logic & administrative authorization governance
-        if fraud_prob >= 45.0 or (amt >= 50000 and fraud_prob >= 35.0) or risk_analysis.get("risk_tier") == "High Risk":
+        if fraud_prob >= 45.0 or (amt >= 50000 and fraud_prob >= 40.0 and risk_analysis.get("risk_tier") != "Low Risk") or risk_analysis.get("risk_tier") == "High Risk":
             decision = "SIU_REFERRAL"
             action = "Refer to Special Investigation Unit (SIU) for comprehensive anti-fraud review."
             fast_track = False
