@@ -16,27 +16,94 @@ from pptx.enum.text import PP_ALIGN
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
-def load_authoritative_eval_summary() -> Dict[str, Any]:
-    """Load authoritative evaluation results from docs/Evaluation_Summary.json."""
-    p = PROJECT_ROOT / "docs" / "Evaluation_Summary.json"
-    if p.exists():
-        try:
-            with open(p, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            pass
-    return {}
+from typing import Dict, Any, List, Optional
 
-def load_authoritative_latency_benchmark() -> Dict[str, Any]:
-    """Load authoritative latency benchmark measurements from docs/latency_benchmark.json."""
-    p = PROJECT_ROOT / "docs" / "latency_benchmark.json"
-    if p.exists():
-        try:
-            with open(p, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            pass
-    return {}
+def load_authoritative_eval_summary(p: Optional[Path] = None) -> Dict[str, Any]:
+    """Load authoritative evaluation results from docs/Evaluation_Summary.json.
+    Raises FileNotFoundError if missing, ValueError if malformed or missing required metrics.
+    """
+    path = p or (PROJECT_ROOT / "docs" / "Evaluation_Summary.json")
+    if not path.exists():
+        raise FileNotFoundError(f"Authoritative evaluation summary file not found: {path}")
+
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception as err:
+        raise ValueError(f"Failed to parse JSON from {path}: {err}") from err
+
+    if not isinstance(data, dict):
+        raise ValueError(f"Root of {path} must be a JSON object, got {type(data).__name__}")
+
+    metrics = data.get("metrics_summary")
+    if not isinstance(metrics, dict):
+        raise ValueError(f"Missing or invalid 'metrics_summary' object in {path}")
+
+    required_metric_keys = [
+        "judge_faithfulness_score",
+        "judge_completeness_score",
+        "judge_policy_compliance_score",
+        "judge_overall_quality_score",
+        "overall_system_grade"
+    ]
+    for k in required_metric_keys:
+        if k not in metrics:
+            raise ValueError(f"Required evaluation metric '{k}' missing from metrics_summary in {path}")
+        if k != "overall_system_grade":
+            v = metrics[k]
+            if not isinstance(v, (int, float)) or isinstance(v, bool):
+                raise ValueError(f"Evaluation metric '{k}' must be numeric, got {v!r}")
+            if not (0.0 <= v <= 1.0):
+                raise ValueError(f"Evaluation metric '{k}' out of range [0.0, 1.0]: {v}")
+
+    if not isinstance(data.get("individual_results"), list) or len(data["individual_results"]) == 0:
+        raise ValueError(f"'individual_results' in {path} must be a non-empty list of test cases")
+
+    return data
+
+def load_authoritative_latency_benchmark(p: Optional[Path] = None) -> Dict[str, Any]:
+    """Load authoritative latency benchmark measurements from docs/latency_benchmark.json.
+    Raises FileNotFoundError if missing, ValueError if malformed or missing required benchmarks.
+    """
+    path = p or (PROJECT_ROOT / "docs" / "latency_benchmark.json")
+    if not path.exists():
+        raise FileNotFoundError(f"Authoritative latency benchmark file not found: {path}")
+
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception as err:
+        raise ValueError(f"Failed to parse JSON from {path}: {err}") from err
+
+    if not isinstance(data, dict):
+        raise ValueError(f"Root of {path} must be a JSON object, got {type(data).__name__}")
+
+    benchmarks = data.get("benchmarks")
+    if not isinstance(benchmarks, dict):
+        raise ValueError(f"Missing or invalid 'benchmarks' object in {path}")
+
+    required_b_keys = [
+        "vector_matrix_cosine_search",
+        "bm25_keyword_search",
+        "internal_hybrid_rrf_fusion",
+        "end_to_end_hybrid_retrieval"
+    ]
+    for b in required_b_keys:
+        if b == "internal_hybrid_rrf_fusion" and b not in benchmarks and "internal_hybrid_fusion" in benchmarks:
+            benchmarks["internal_hybrid_rrf_fusion"] = benchmarks["internal_hybrid_fusion"]
+        if b not in benchmarks:
+            raise ValueError(f"Required benchmark category '{b}' missing from {path}")
+        stats = benchmarks[b].get("stats")
+        if not isinstance(stats, dict):
+            raise ValueError(f"Benchmark '{b}' missing valid 'stats' dict in {path}")
+        for stat_key in ["min_ms", "median_ms", "mean_ms", "p95_ms", "max_ms"]:
+            if stat_key not in stats:
+                raise ValueError(f"Benchmark '{b}' missing '{stat_key}' in {path}")
+            val = stats[stat_key]
+            if not isinstance(val, (int, float)) or isinstance(val, bool) or val < 0.0:
+                raise ValueError(f"Benchmark '{b}' stat '{stat_key}' must be non-negative numeric, got {val!r}")
+
+    return data
 
 def build_pdf_document(filename: Path, story_flowables):
     filename.parent.mkdir(parents=True, exist_ok=True)
@@ -60,7 +127,7 @@ def generate_architecture_diagram():
     img_path = PROJECT_ROOT / "architecture" / "Architecture_Diagram.png"
     styles = getSampleStyleSheet()
     eval_sum = load_authoritative_eval_summary()
-    judge_score = eval_sum.get("metrics_summary", {}).get("judge_overall_quality_score", 0.93) * 10.0
+    judge_score = eval_sum["metrics_summary"]["judge_overall_quality_score"] * 10.0
     
     title_style = ParagraphStyle(
         'DocTitle',
@@ -137,16 +204,16 @@ def generate_design_document():
     eval_sum = load_authoritative_eval_summary()
     latency_bench = load_authoritative_latency_benchmark()
     
-    metrics = eval_sum.get("metrics_summary", {})
-    benchmarks = latency_bench.get("benchmarks", {})
+    metrics = eval_sum["metrics_summary"]
+    benchmarks = latency_bench["benchmarks"]
     
-    vec_median = benchmarks.get("vector_matrix_cosine_search", {}).get("stats", {}).get("median_ms", 2.45)
-    e2e_median = benchmarks.get("end_to_end_hybrid_retrieval", {}).get("stats", {}).get("median_ms", 301.86)
+    vec_median = benchmarks["vector_matrix_cosine_search"]["stats"]["median_ms"]
+    e2e_median = benchmarks["end_to_end_hybrid_retrieval"]["stats"]["median_ms"]
     
-    faith_pct = metrics.get("judge_faithfulness_score", 0.95) * 100
-    rel_pct = metrics.get("judge_completeness_score", 0.90) * 100
-    comp_pct = metrics.get("judge_policy_compliance_score", 0.95) * 100
-    judge_val = metrics.get("judge_overall_quality_score", 0.93) * 10.0
+    faith_pct = metrics["judge_faithfulness_score"] * 100.0
+    rel_pct = metrics["judge_completeness_score"] * 100.0
+    comp_pct = metrics["judge_policy_compliance_score"] * 100.0
+    judge_val = metrics["judge_overall_quality_score"] * 10.0
 
     h1 = ParagraphStyle('H1', parent=styles['Heading1'], fontSize=16, leading=20, textColor=colors.HexColor('#1E3A8A'), spaceBefore=12, spaceAfter=6)
     h2 = ParagraphStyle('H2', parent=styles['Heading2'], fontSize=12, leading=16, textColor=colors.HexColor('#2563EB'), spaceBefore=8, spaceAfter=4)
@@ -284,7 +351,7 @@ def generate_dataset_details():
     out_path = PROJECT_ROOT / "docs" / "Dataset_Details.pdf"
     styles = getSampleStyleSheet()
     latency_bench = load_authoritative_latency_benchmark()
-    vec_median = latency_bench.get("benchmarks", {}).get("vector_matrix_cosine_search", {}).get("stats", {}).get("median_ms", 2.45)
+    vec_median = latency_bench["benchmarks"]["vector_matrix_cosine_search"]["stats"]["median_ms"]
 
     h1 = ParagraphStyle('H1', parent=styles['Heading1'], fontSize=15, leading=19, textColor=colors.HexColor('#1E3A8A'), spaceBefore=10, spaceAfter=4)
     body = ParagraphStyle('Body', parent=styles['Normal'], fontSize=9, leading=13, textColor=colors.HexColor('#334155'), spaceAfter=5)
@@ -352,16 +419,16 @@ def generate_evaluation_report():
     styles = getSampleStyleSheet()
     eval_sum = load_authoritative_eval_summary()
     
-    metrics = eval_sum.get("metrics_summary", {})
-    results = eval_sum.get("individual_results", [])
-    timestamp = eval_sum.get("evaluation_timestamp", "2026-10-09")
-    grade = metrics.get("overall_system_grade", "EXCELLENT (A+)")
-    pass_rate = eval_sum.get("pass_rate_percent", 100.0)
+    metrics = eval_sum["metrics_summary"]
+    results = eval_sum["individual_results"]
+    timestamp = eval_sum["evaluation_timestamp"]
+    grade = metrics["overall_system_grade"]
+    pass_rate = eval_sum["pass_rate_percent"]
     
-    faith_pct = metrics.get("judge_faithfulness_score", 0.95) * 100
-    rel_pct = metrics.get("judge_completeness_score", 0.90) * 100
-    comp_pct = metrics.get("judge_policy_compliance_score", 0.95) * 100
-    judge_score = metrics.get("judge_overall_quality_score", 0.93) * 10.0
+    faith_pct = metrics["judge_faithfulness_score"] * 100.0
+    rel_pct = metrics["judge_completeness_score"] * 100.0
+    comp_pct = metrics["judge_policy_compliance_score"] * 100.0
+    judge_score = metrics["judge_overall_quality_score"] * 10.0
 
     h1 = ParagraphStyle('H1', parent=styles['Heading1'], fontSize=15, leading=19, textColor=colors.HexColor('#1E3A8A'), spaceBefore=10, spaceAfter=4)
     body = ParagraphStyle('Body', parent=styles['Normal'], fontSize=9, leading=13, textColor=colors.HexColor('#334155'), spaceAfter=5)
@@ -451,16 +518,18 @@ def generate_presentation_deck():
     eval_sum = load_authoritative_eval_summary()
     latency_bench = load_authoritative_latency_benchmark()
     
-    metrics = eval_sum.get("metrics_summary", {})
-    benchmarks = latency_bench.get("benchmarks", {})
+    metrics = eval_sum["metrics_summary"]
+    benchmarks = latency_bench["benchmarks"]
     
-    vec_median = benchmarks.get("vector_matrix_cosine_search", {}).get("stats", {}).get("median_ms", 2.45)
-    e2e_median = benchmarks.get("end_to_end_hybrid_retrieval", {}).get("stats", {}).get("median_ms", 301.86)
-    faith_pct = metrics.get("judge_faithfulness_score", 0.95) * 100
-    rel_pct = metrics.get("judge_completeness_score", 0.90) * 100
-    comp_pct = metrics.get("judge_policy_compliance_score", 0.95) * 100
-    judge_val = metrics.get("judge_overall_quality_score", 0.93) * 10.0
-    grade = metrics.get("overall_system_grade", "EXCELLENT (A+)")
+    vec_median = benchmarks["vector_matrix_cosine_search"]["stats"]["median_ms"]
+    bm25_median = benchmarks["bm25_keyword_search"]["stats"]["median_ms"]
+    rrf_median = benchmarks["internal_hybrid_rrf_fusion"]["stats"]["median_ms"]
+    e2e_median = benchmarks["end_to_end_hybrid_retrieval"]["stats"]["median_ms"]
+    faith_pct = metrics["judge_faithfulness_score"] * 100.0
+    rel_pct = metrics["judge_completeness_score"] * 100.0
+    comp_pct = metrics["judge_policy_compliance_score"] * 100.0
+    judge_val = metrics["judge_overall_quality_score"] * 10.0
+    grade = metrics["overall_system_grade"]
 
     prs = Presentation()
     prs.slide_width = Inches(13.333)
@@ -592,9 +661,9 @@ def generate_presentation_deck():
         "Zero Windows SQLite locking or crash issues via pure NumPy matrix math."
     ])
     add_card(s4, 6.8, 1.5, 5.6, 5.4, "Empirical Benchmark Results", [
-        f"NumPy Matrix Cosine Search: {vec_median:.2f} ms median (measured over 200 runs).",
-        "BM25Okapi Keyword Search: 10.91 ms median.",
-        "Internal Hybrid RRF Fusion: 13.89 ms median (excluding network).",
+        f"NumPy Matrix Cosine Search: {vec_median:.2f} ms median.",
+        f"BM25Okapi Keyword Search: {bm25_median:.2f} ms median.",
+        f"Internal Hybrid RRF Fusion: {rrf_median:.2f} ms median (excluding network).",
         f"End-to-End Hybrid Search (Live API): {e2e_median:.1f} ms median roundtrip.",
         "Measured with warmup exclusion and saved to docs/latency_benchmark.json."
     ], bg_rgb=(236, 253, 245), border_rgb=(110, 231, 183))
@@ -632,7 +701,7 @@ def generate_presentation_deck():
         "TC-002 (Business arson risk): Correctly routed to SIU_REFERRAL.",
         "TC-003 (Home water damage): Correctly routed to MANUAL_REVIEW.",
         "Net settlement ceilings independently validated against financial invariants.",
-        "Full test suite passing with 24 automated unit, RAG, and API tests."
+        "Full test suite passing with comprehensive automated unit, RAG, evaluation harness, and API tests."
     ])
 
     # Slide 7: Conclusion & Deliverables

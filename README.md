@@ -43,7 +43,7 @@ To build an AI-assisted claims retrieval, prediction, and multi-agent workflow s
 | **Programming Language** | Python 3.11 | Core runtime environment |
 | **LLM Used** | OpenAI `gpt-5-nano` via `https://aicredits.in/v1` | Multi-agent reasoning, synthesis, and LLM-as-Judge |
 | **Embedding Model** | OpenAI `text-embedding-3-small` | 1536-dimensional dense claim vector embeddings (with deterministic fallback) |
-| **Vector Database** | In-Memory Vector Store | NumPy normalized cosine similarity retrieval (2.45 ms median matrix search over 2,000 indexed records; see empirical benchmark in `docs/latency_benchmark.json`) |
+| **Vector Database** | In-Memory Vector Store | NumPy normalized cosine similarity retrieval (3.08 ms median matrix search over 2,000 indexed records; see empirical benchmark in `docs/latency_benchmark.json`) |
 | **Keyword Search** | Rank-BM25 | BM25Okapi lexical token search |
 | **Machine Learning** | Scikit-Learn (Random Forest) | Regression (Amount, Days) & Calibrated Classification (Fraud) |
 | **Backend Microservice** | FastAPI, Uvicorn, Pydantic v2 | High-throughput async REST API with validation guardrails |
@@ -120,7 +120,7 @@ ProjectRepository/
 - **Sampling Scope & Execution Pipeline:**
   - **Source Scale:** 100M synthetic claims across multiple partitioned Parquet files.
   - **Local Model Training Sample:** 10,000 records extracted from row group 0 of the primary Parquet partition.
-  - **In-Memory Semantic Vector Store:** 2,000 records indexed at startup into an in-memory normalized NumPy cosine matrix for fast matrix dot-product calculations (~2.45 ms median isolated vector search), with ~301.86 ms median end-to-end response time when including live external OpenAI embedding network roundtrips.
+  - **In-Memory Semantic Vector Store:** 2,000 records indexed at startup into an in-memory normalized NumPy cosine matrix for fast matrix dot-product calculations (~3.08 ms median isolated vector search), with ~303.59 ms median end-to-end response time when including live external OpenAI embedding network roundtrips.
 - **Dual-Probability Underwriting Policy:**
   - **Calibrated Risk (Platt Scaling):** Reflects true statistical population likelihood (8.5% industry baseline). A calibrated risk $< 8.5\%$ with clean loss history ($0$ prior claims) and routine loss ($\le \$5,000$) qualifies for fast-track `AUTO_APPROVE`.
   - **Raw Model Probability:** Uncalibrated Random Forest tree split ratio. Serves as a secondary risk indicator; raw score $\ge 45.0\%$ triggers mandatory `SIU_REFERRAL`.
@@ -208,7 +208,7 @@ streamlit run frontend.py
 ```bash
 pytest -v
 ```
-*(All 32 comprehensive unit, guardrail, RAG metadata filtering, evaluation harness, and API tests pass in under 35 seconds)*
+*(All 36 comprehensive unit, guardrail, RAG metadata filtering, evaluation harness, and API tests pass in under 25 seconds)*
 
 ### Run LLM-as-Judge Evaluation Suite
 ```bash
@@ -228,11 +228,11 @@ Empirical measurement results over 2,000 active indexed vectors with 25 warm-up 
 
 | Component | Min | Median | Mean | P95 | Max |
 | :--- | :---: | :---: | :---: | :---: | :---: |
-| **NumPy Vector Cosine Search (isolated)** | 1.94 ms | 2.45 ms | 3.01 ms | 4.90 ms | 20.47 ms |
-| **Local Hash Fallback Embedding (CPU)** | 0.08 ms | 0.12 ms | 0.14 ms | 0.22 ms | 1.09 ms |
-| **BM25Okapi Keyword Search** | 8.87 ms | 10.91 ms | 11.23 ms | 13.91 ms | 24.23 ms |
-| **Internal Hybrid RRF Fusion** | 11.16 ms | 13.89 ms | 14.54 ms | 18.25 ms | 33.15 ms |
-| **End-to-End Hybrid Search (Live API)** | 253.94 ms | 301.86 ms | 330.40 ms | 533.84 ms | 891.31 ms |
+| **NumPy Vector Cosine Search (isolated)** | 2.30 ms | 3.08 ms | 3.55 ms | 5.34 ms | 11.10 ms |
+| **Local Hash Fallback Embedding (CPU)** | 0.12 ms | 0.13 ms | 0.15 ms | 0.23 ms | 0.30 ms |
+| **BM25Okapi Keyword Search** | 7.44 ms | 10.22 ms | 10.48 ms | 14.01 ms | 16.52 ms |
+| **Internal Hybrid RRF Fusion** | 10.91 ms | 13.52 ms | 14.10 ms | 18.58 ms | 23.07 ms |
+| **End-to-End Hybrid Search (Live API, 50 runs)** | 290.21 ms | 303.59 ms | 316.47 ms | 403.10 ms | 440.90 ms |
 
 ### Dual-Probability Underwriting Policy
 ClaimLens differentiates between the **raw Random Forest probability** (uncalibrated leaf proportion) and the **calibrated posterior risk** (via 5-fold `CalibratedClassifierCV` sigmoid calibration adjusted to the 8.5% industry fraud prevalence):

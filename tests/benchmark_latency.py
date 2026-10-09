@@ -32,7 +32,7 @@ def compute_stats(arr: List[float]) -> Dict[str, float]:
 def run_latency_benchmarks(
     matrix_runs: int = 200,
     warmup_runs: int = 25,
-    api_e2e_runs: int = 15
+    api_e2e_runs: int = 50
 ) -> Dict[str, Any]:
     """Run comprehensive, empirical latency benchmarks across all retrieval subsystems.
     
@@ -55,7 +55,7 @@ def run_latency_benchmarks(
     print("=" * 75)
     print("CLAIMLENS EMPIRICAL LATENCY BENCHMARK SUITE")
     print(f"Matrix Iterations: {matrix_runs} (Warm-up: {warmup_runs}) | Indexed Vectors: {n_records}")
-    print(f"Embedding Dimension: {dim} | Environment: {platform.system()} ({platform.machine()})")
+    print(f"E2E Iterations: {api_e2e_runs} | Dimension: {dim} | OS: {platform.system()} ({platform.machine()})")
     print("=" * 75)
 
     test_queries = [
@@ -147,23 +147,42 @@ def run_latency_benchmarks(
     # 5. End-to-End Hybrid Search Latency (hybrid_retriever.search via live/mock)
     # --------------------------------------------------------------------------
     print(f"[5/5] Benchmarking end-to-end hybrid retrieval ({api_e2e_runs} iterations)...")
-    # 2 warm-up iterations
-    for i in range(min(2, api_e2e_runs)):
-        _ = hybrid_retriever.search(query=test_queries[i % len(test_queries)], top_k=5)
+    e2e_warmup = min(5, api_e2e_runs)
+    for i in range(e2e_warmup):
+        try:
+            _ = hybrid_retriever.search(query=test_queries[i % len(test_queries)], top_k=5)
+        except Exception:
+            pass
 
     e2e_latencies_ms = []
+    failed_requests = 0
     for i in range(api_e2e_runs):
         qtext = test_queries[i % len(test_queries)]
         t0 = time.perf_counter()
-        _ = hybrid_retriever.search(query=qtext, top_k=5)
-        t1 = time.perf_counter()
-        e2e_latencies_ms.append((t1 - t0) * 1000.0)
+        try:
+            res = hybrid_retriever.search(query=qtext, top_k=5)
+            t1 = time.perf_counter()
+            if not res:
+                failed_requests += 1
+            else:
+                e2e_latencies_ms.append((t1 - t0) * 1000.0)
+        except Exception:
+            failed_requests += 1
+
+    if not e2e_latencies_ms:
+        raise RuntimeError("All end-to-end hybrid retrieval benchmark requests failed.")
 
     is_live_api = bool(embedding_service.client is not None)
 
     results = {
         "benchmark_timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "methodology": "Empirical multi-iteration latency measurement with warm-up exclusion and isolated matrix math",
+        "sample_limitations_and_validity": (
+            "The isolated vector search benchmark measures mathematical compute throughput and execution "
+            "latency (in-memory NumPy dot-product and top-k selection) over 2,000 indexed records. "
+            "This test validates runtime performance, not semantic retrieval relevance. "
+            "Semantic accuracy is independently measured in the evaluation suite (TC-001 through TC-003)."
+        ),
         "environment": {
             "os": platform.platform(),
             "python_version": platform.python_version(),
@@ -171,7 +190,8 @@ def run_latency_benchmarks(
             "processor": platform.processor(),
             "active_indexed_vectors": n_records,
             "embedding_dimension": dim,
-            "live_embedding_api_active": is_live_api
+            "live_embedding_api_active": is_live_api,
+            "embedding_mode": "live_external_api" if is_live_api else "deterministic_local_fallback"
         },
         "benchmarks": {
             "vector_matrix_cosine_search": {
@@ -192,16 +212,24 @@ def run_latency_benchmarks(
                 "measured_iterations": matrix_runs,
                 "stats": compute_stats(bm25_latencies_ms)
             },
-            "internal_hybrid_fusion": {
+            "internal_hybrid_rrf_fusion": {
                 "operation": "Vector search_by_vector + BM25 score merge via Reciprocal Rank Fusion (excluding network)",
+                "warmup_runs": warmup_runs,
+                "measured_iterations": matrix_runs,
+                "stats": compute_stats(fusion_latencies_ms)
+            },
+            "internal_hybrid_fusion": {
+                "operation": "Alias for internal_hybrid_rrf_fusion",
                 "warmup_runs": warmup_runs,
                 "measured_iterations": matrix_runs,
                 "stats": compute_stats(fusion_latencies_ms)
             },
             "end_to_end_hybrid_retrieval": {
                 "operation": "Full pipeline: Natural language query string -> Embedding generation -> Vector Search + BM25 -> RRF top-5",
-                "warmup_runs": 2,
+                "warmup_runs": e2e_warmup,
                 "measured_iterations": api_e2e_runs,
+                "successful_iterations": len(e2e_latencies_ms),
+                "failed_iterations": failed_requests,
                 "stats": compute_stats(e2e_latencies_ms)
             }
         }
@@ -210,7 +238,7 @@ def run_latency_benchmarks(
     v_stat = results["benchmarks"]["vector_matrix_cosine_search"]["stats"]
     f_stat = results["benchmarks"]["local_fallback_embedding_generation"]["stats"]
     b_stat = results["benchmarks"]["bm25_keyword_search"]["stats"]
-    h_stat = results["benchmarks"]["internal_hybrid_fusion"]["stats"]
+    h_stat = results["benchmarks"]["internal_hybrid_rrf_fusion"]["stats"]
     e_stat = results["benchmarks"]["end_to_end_hybrid_retrieval"]["stats"]
 
     print("\n" + "=" * 78)

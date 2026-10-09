@@ -5,133 +5,286 @@ import numpy as np
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
-def test_tc003_loss_amount_constraint_logic():
-    """Verify that TC-003 fails constraint checks if claim amount is below min_loss_amount ($10k)."""
-    min_required = 10000.0
+from tests.run_evaluation import (
+    compute_expected_net_settlement_ceiling,
+    verify_net_settlement_ceiling,
+    verify_benchmark_constraints,
+    validate_judge_metrics,
+    calculate_test_passed,
+    derive_overall_grade,
+    EVAL_BENCHMARKS
+)
+from scripts.generate_all_deliverables import (
+    load_authoritative_eval_summary,
+    load_authoritative_latency_benchmark
+)
 
-    # Passing case: $24,000 claim amount
-    passing_claim = {"claim_amount": 24000.0, "deductible": 2500.0}
-    assert passing_claim["claim_amount"] >= min_required
 
-    # Failing case: $6,000 claim amount
-    failing_claim = {"claim_amount": 6000.0, "deductible": 1000.0}
-    assert failing_claim["claim_amount"] < min_required
+# ==============================================================================
+# 1. PRODUCTION EVALUATION LOGIC TESTS
+# ==============================================================================
 
-def test_settlement_ceiling_invariant_across_all_tiers():
-    """Verify net settlement ceiling strictly equals max(0, Claim Amount - Deductible)."""
-    test_cases = [
-        {"claim_amount": 2800.0, "deductible": 500.0, "expected_ceiling": 2300.0},
-        {"claim_amount": 85000.0, "deductible": 1000.0, "expected_ceiling": 84000.0},
-        {"claim_amount": 24000.0, "deductible": 2500.0, "expected_ceiling": 21500.0},
-        {"claim_amount": 400.0, "deductible": 500.0, "expected_ceiling": 0.0},
-    ]
+def test_production_settlement_ceiling_functions():
+    """Verify production settlement ceiling functions correctly enforce the invariant max(0, claim - ded)."""
+    # Standard auto claim
+    expected = compute_expected_net_settlement_ceiling(claim_amount=2800.0, deductible=500.0)
+    assert expected == 2300.0
+    assert verify_net_settlement_ceiling(actual_ceiling=2300.0, claim_amount=2800.0, deductible=500.0) is True
 
-    for tc in test_cases:
-        calculated = max(0.0, round(tc["claim_amount"] - tc["deductible"], 2))
-        assert calculated == tc["expected_ceiling"]
+    # High-value business claim
+    expected_high = compute_expected_net_settlement_ceiling(claim_amount=85000.0, deductible=1000.0)
+    assert expected_high == 84000.0
+    assert verify_net_settlement_ceiling(actual_ceiling=84000.0, claim_amount=85000.0, deductible=1000.0) is True
 
-def test_evaluation_metric_validator_rejects_malformed_values():
-    """Verify that judge metric parser rejects non-numeric, boolean, NaN, and out-of-range values."""
-    def validate_metric(val):
-        if not isinstance(val, (int, float)) or isinstance(val, bool) or not np.isfinite(val):
-            raise ValueError(f"Metric must be finite numeric, got {val!r}")
-        if not (0.0 <= val <= 10.0):
-            raise ValueError(f"Metric out of bounds [0.0, 10.0]: {val}")
-        return val
+    # Claim amount within deductible: ceiling must be strictly 0.0
+    expected_zero = compute_expected_net_settlement_ceiling(claim_amount=400.0, deductible=500.0)
+    assert expected_zero == 0.0
+    assert verify_net_settlement_ceiling(actual_ceiling=0.0, claim_amount=400.0, deductible=500.0) is True
 
-    # Valid values
-    assert validate_metric(9.5) == 9.5
-    assert validate_metric(0.0) == 0.0
-    assert validate_metric(10.0) == 10.0
+    # Rejection of invalid / exceeded ceiling
+    assert verify_net_settlement_ceiling(actual_ceiling=2800.0, claim_amount=2800.0, deductible=500.0) is False
+    assert verify_net_settlement_ceiling(actual_ceiling=-1.0, claim_amount=2800.0, deductible=500.0) is False
 
-    # Invalid: boolean (subclass of int in Python)
-    with pytest.raises(ValueError, match="finite numeric"):
-        validate_metric(True)
 
-    # Invalid: string
-    with pytest.raises(ValueError, match="finite numeric"):
-        validate_metric("9.5")
+def test_production_tc003_minimum_loss_constraint():
+    """Verify production verify_benchmark_constraints enforces TC-003 min_loss_amount ($10k)."""
+    tc003 = next(tc for tc in EVAL_BENCHMARKS if tc["test_id"] == "TC-003")
+    assert tc003["min_loss_amount"] == 10000.0
 
-    # Invalid: NaN / Inf
-    with pytest.raises(ValueError, match="finite numeric"):
-        validate_metric(float("nan"))
-    with pytest.raises(ValueError, match="finite numeric"):
-        validate_metric(float("inf"))
+    # Passing case: $24,000 loss
+    valid_inp = dict(tc003["input"])
+    valid_rec = {"decision": "MANUAL_ADJUSTER_REVIEW", "net_settlement_ceiling": 21500.0}
+    valid_risk = {"fraud_probability_percent": 20.0}
+    valid_ml = {"calibrated_fraud_probability_percent": 12.0}
 
-    # Invalid: out of bounds
+    passed, notes = verify_benchmark_constraints(tc003, valid_inp, valid_rec, valid_risk, valid_ml)
+    assert passed is True
+    assert len(notes) == 0
+
+    # Failing case: Claim amount $8,000 (below $10,000 minimum)
+    failing_inp = dict(tc003["input"])
+    failing_inp["claim_amount"] = 8000.0
+    failing_rec = {"decision": "MANUAL_ADJUSTER_REVIEW", "net_settlement_ceiling": 5500.0}
+
+    passed_fail, notes_fail = verify_benchmark_constraints(tc003, failing_inp, failing_rec, valid_risk, valid_ml)
+    assert passed_fail is False
+    assert any("min_loss_amount" in n for n in notes_fail)
+
+
+def test_production_constraints_detect_ceiling_violation():
+    """Verify production verify_benchmark_constraints rejects violated net settlement ceilings."""
+    tc001 = next(tc for tc in EVAL_BENCHMARKS if tc["test_id"] == "TC-001")
+    inp = dict(tc001["input"])  # claim 2800, ded 500 -> expected ceiling 2300
+    risk = {"fraud_probability_percent": 25.0}
+    ml = {"calibrated_fraud_probability_percent": 6.1}
+
+    # Rec proposes illegal ceiling 2800 (failed to deduct deductible)
+    bad_rec = {"decision": "AUTO_APPROVE", "net_settlement_ceiling": 2800.0}
+    passed, notes = verify_benchmark_constraints(tc001, inp, bad_rec, risk, ml)
+    assert passed is False
+    assert any("Net settlement ceiling" in n for n in notes)
+
+
+def test_production_validate_judge_metrics_accepts_valid():
+    """Verify production validate_judge_metrics accepts valid scores and normalizes to [0, 1]."""
+    valid_judge = {
+        "verdict": "PASS",
+        "overall_quality_score": 9.3,
+        "metric_scores": {
+            "factual_consistency": 9.5,
+            "completeness": 9.0,
+            "policy_compliance": 9.5
+        }
+    }
+    norm = validate_judge_metrics(valid_judge, test_id="TC-VALID")
+    assert norm["judge_faithfulness_score"] == 0.95
+    assert norm["judge_completeness_score"] == 0.90
+    assert norm["judge_policy_compliance_score"] == 0.95
+    assert norm["judge_overall_quality_score"] == 0.93
+
+
+def test_production_validate_judge_metrics_rejects_malformed_and_out_of_bounds():
+    """Verify production validate_judge_metrics rejects missing, non-numeric, boolean, NaN, and out-of-range metrics."""
+    # 1. Non-dict input
+    with pytest.raises(ValueError, match="must be a dictionary"):
+        validate_judge_metrics("invalid_string")
+
+    # 2. Missing metric_scores dict
+    with pytest.raises(ValueError, match="missing valid 'metric_scores'"):
+        validate_judge_metrics({"verdict": "PASS", "overall_quality_score": 9.0})
+
+    # 3. Missing required metric
+    incomplete_judge = {
+        "overall_quality_score": 9.0,
+        "metric_scores": {"factual_consistency": 9.0, "completeness": 9.0}
+    }
+    with pytest.raises(ValueError, match="missing required metric 'policy_compliance'"):
+        validate_judge_metrics(incomplete_judge)
+
+    # 4. Boolean value (must not be treated as int 1)
+    bool_judge = {
+        "overall_quality_score": 9.0,
+        "metric_scores": {"factual_consistency": True, "completeness": 9.0, "policy_compliance": 9.0}
+    }
+    with pytest.raises(ValueError, match="must be finite numeric"):
+        validate_judge_metrics(bool_judge)
+
+    # 5. String value
+    str_judge = {
+        "overall_quality_score": 9.0,
+        "metric_scores": {"factual_consistency": "9.5", "completeness": 9.0, "policy_compliance": 9.0}
+    }
+    with pytest.raises(ValueError, match="must be finite numeric"):
+        validate_judge_metrics(str_judge)
+
+    # 6. NaN / Inf
+    nan_judge = {
+        "overall_quality_score": 9.0,
+        "metric_scores": {"factual_consistency": float("nan"), "completeness": 9.0, "policy_compliance": 9.0}
+    }
+    with pytest.raises(ValueError, match="must be finite numeric"):
+        validate_judge_metrics(nan_judge)
+
+    # 7. Out of bounds (> 10.0 or < 0.0)
+    high_judge = {
+        "overall_quality_score": 9.0,
+        "metric_scores": {"factual_consistency": 11.5, "completeness": 9.0, "policy_compliance": 9.0}
+    }
     with pytest.raises(ValueError, match="out of bounds"):
-        validate_metric(10.5)
+        validate_judge_metrics(high_judge)
+
+    neg_judge = {
+        "overall_quality_score": 9.0,
+        "metric_scores": {"factual_consistency": -1.0, "completeness": 9.0, "policy_compliance": 9.0}
+    }
     with pytest.raises(ValueError, match="out of bounds"):
-        validate_metric(-0.5)
+        validate_judge_metrics(neg_judge)
 
-def test_algorithmic_grade_derivation():
-    """Verify objective grade calculation from pass rate and average metric scores."""
-    def derive_grade(pass_rate: float, mean_metric: float) -> str:
-        if pass_rate == 1.0 and mean_metric >= 0.90:
-            return "EXCELLENT (A+)"
-        elif pass_rate >= 0.75 and mean_metric >= 0.80:
-            return "VERY GOOD (A)"
-        elif pass_rate >= 0.50:
-            return "SATISFACTORY (B)"
-        else:
-            return "REQUIRES_REVIEW (C)"
 
-    assert derive_grade(1.0, 0.93) == "EXCELLENT (A+)"
-    assert derive_grade(1.0, 0.85) == "VERY GOOD (A)"
-    assert derive_grade(0.80, 0.82) == "VERY GOOD (A)"
-    assert derive_grade(0.66, 0.85) == "SATISFACTORY (B)"
-    assert derive_grade(0.33, 0.95) == "REQUIRES_REVIEW (C)"
+def test_production_calculate_test_passed_requires_all_gates():
+    """Verify calculate_test_passed passes if and only if decision aligns, constraints pass, and judge passes."""
+    good_judge = {"verdict": "PASS", "overall_quality_score": 9.0}
+    flagged_judge = {"verdict": "FLAGGED_FOR_AUDIT", "overall_quality_score": 9.0}
+    low_score_judge = {"verdict": "PASS", "overall_quality_score": 7.5}
 
-def test_latency_compute_stats_accuracy():
-    """Verify summary statistics calculations in benchmark_latency.py."""
-    from tests.benchmark_latency import compute_stats
+    # All pass
+    assert calculate_test_passed(decision_aligned=True, constraints_passed=True, judge=good_judge) is True
 
-    sample = [2.0, 2.2, 2.5, 3.0, 4.0, 10.0]
-    stats = compute_stats(sample)
+    # Failed decision alignment
+    assert calculate_test_passed(decision_aligned=False, constraints_passed=True, judge=good_judge) is False
 
-    assert stats["min_ms"] == 2.0
-    assert stats["max_ms"] == 10.0
-    assert stats["median_ms"] == round(float(np.median(sample)), 3)
-    assert stats["mean_ms"] == round(float(np.mean(sample)), 3)
-    assert stats["p95_ms"] > stats["median_ms"]
+    # Failed constraints
+    assert calculate_test_passed(decision_aligned=True, constraints_passed=False, judge=good_judge) is False
 
-def test_authoritative_json_files_conformance():
-    """Verify docs/Evaluation_Summary.json and docs/latency_benchmark.json conform to declared schemas."""
-    eval_file = PROJECT_ROOT / "docs" / "Evaluation_Summary.json"
-    bench_file = PROJECT_ROOT / "docs" / "latency_benchmark.json"
+    # Failed judge verdict
+    assert calculate_test_passed(decision_aligned=True, constraints_passed=True, judge=flagged_judge) is False
 
-    assert eval_file.exists(), "docs/Evaluation_Summary.json must exist"
-    assert bench_file.exists(), "docs/latency_benchmark.json must exist"
+    # Failed judge score (< 8.0)
+    assert calculate_test_passed(decision_aligned=True, constraints_passed=True, judge=low_score_judge) is False
 
-    with open(eval_file, "r", encoding="utf-8") as f:
-        eval_data = json.load(f)
 
-    with open(bench_file, "r", encoding="utf-8") as f:
-        bench_data = json.load(f)
+def test_production_derive_overall_grade():
+    """Verify derive_overall_grade correctly derives grades based on objective pass rate and mean scores."""
+    assert derive_overall_grade(pass_rate=1.0, mean_metric=0.93) == "EXCELLENT (A+)"
+    assert derive_overall_grade(pass_rate=1.0, mean_metric=0.88) == "VERY GOOD (A)"
+    assert derive_overall_grade(pass_rate=0.80, mean_metric=0.82) == "VERY GOOD (A)"
+    assert derive_overall_grade(pass_rate=0.66, mean_metric=0.85) == "SATISFACTORY (B)"
+    assert derive_overall_grade(pass_rate=0.33, mean_metric=0.95) == "REQUIRES_REVIEW (C)"
 
-    # Validate Evaluation Summary structure
-    assert "evaluation_timestamp" in eval_data
+
+# ==============================================================================
+# 2. DELIVERABLES JSON VALIDATION & NEGATIVE TESTS
+# ==============================================================================
+
+def test_load_authoritative_eval_summary_negative_cases(tmp_path):
+    """Verify load_authoritative_eval_summary raises explicit errors on missing or invalid files."""
+    # 1. Non-existent file
+    missing_file = tmp_path / "non_existent.json"
+    with pytest.raises(FileNotFoundError, match="not found"):
+        load_authoritative_eval_summary(missing_file)
+
+    # 2. Malformed JSON
+    bad_json = tmp_path / "bad.json"
+    bad_json.write_text("{ incomplete json ...", encoding="utf-8")
+    with pytest.raises(ValueError, match="Failed to parse JSON"):
+        load_authoritative_eval_summary(bad_json)
+
+    # 3. Missing metrics_summary
+    no_metrics = tmp_path / "no_metrics.json"
+    no_metrics.write_text(json.dumps({"individual_results": [{"test_id": "T1"}]}), encoding="utf-8")
+    with pytest.raises(ValueError, match="Missing or invalid 'metrics_summary'"):
+        load_authoritative_eval_summary(no_metrics)
+
+    # 4. Missing required metric key in metrics_summary
+    missing_key = tmp_path / "missing_key.json"
+    missing_key.write_text(json.dumps({
+        "metrics_summary": {
+            "judge_faithfulness_score": 0.95,
+            # missing judge_completeness_score
+            "judge_policy_compliance_score": 0.95,
+            "judge_overall_quality_score": 0.93,
+            "overall_system_grade": "EXCELLENT (A+)"
+        },
+        "individual_results": [{"test_id": "T1"}]
+    }), encoding="utf-8")
+    with pytest.raises(ValueError, match="Required evaluation metric 'judge_completeness_score' missing"):
+        load_authoritative_eval_summary(missing_key)
+
+    # 5. Out-of-bounds metric value (> 1.0)
+    out_of_bounds = tmp_path / "out_of_bounds.json"
+    out_of_bounds.write_text(json.dumps({
+        "metrics_summary": {
+            "judge_faithfulness_score": 1.95,  # Invalid
+            "judge_completeness_score": 0.90,
+            "judge_policy_compliance_score": 0.95,
+            "judge_overall_quality_score": 0.93,
+            "overall_system_grade": "EXCELLENT (A+)"
+        },
+        "individual_results": [{"test_id": "T1"}]
+    }), encoding="utf-8")
+    with pytest.raises(ValueError, match="out of range"):
+        load_authoritative_eval_summary(out_of_bounds)
+
+
+def test_load_authoritative_latency_benchmark_negative_cases(tmp_path):
+    """Verify load_authoritative_latency_benchmark raises explicit errors on missing or invalid files."""
+    # 1. Non-existent file
+    missing_file = tmp_path / "non_existent_bench.json"
+    with pytest.raises(FileNotFoundError, match="not found"):
+        load_authoritative_latency_benchmark(missing_file)
+
+    # 2. Malformed JSON
+    bad_json = tmp_path / "bad_bench.json"
+    bad_json.write_text("not json content", encoding="utf-8")
+    with pytest.raises(ValueError, match="Failed to parse JSON"):
+        load_authoritative_latency_benchmark(bad_json)
+
+    # 3. Missing benchmarks category
+    no_bench = tmp_path / "no_bench.json"
+    no_bench.write_text(json.dumps({"environment": {}}), encoding="utf-8")
+    with pytest.raises(ValueError, match="Missing or invalid 'benchmarks'"):
+        load_authoritative_latency_benchmark(no_bench)
+
+    # 4. Missing required benchmark key (e.g. vector_matrix_cosine_search)
+    incomplete_bench = tmp_path / "incomplete_bench.json"
+    incomplete_bench.write_text(json.dumps({
+        "benchmarks": {
+            "bm25_keyword_search": {"stats": {"min_ms": 1.0, "median_ms": 2.0, "mean_ms": 2.0, "p95_ms": 3.0, "max_ms": 4.0}},
+            "internal_hybrid_rrf_fusion": {"stats": {"min_ms": 1.0, "median_ms": 2.0, "mean_ms": 2.0, "p95_ms": 3.0, "max_ms": 4.0}},
+            "end_to_end_hybrid_retrieval": {"stats": {"min_ms": 1.0, "median_ms": 2.0, "mean_ms": 2.0, "p95_ms": 3.0, "max_ms": 4.0}}
+        }
+    }), encoding="utf-8")
+    with pytest.raises(ValueError, match="Required benchmark category 'vector_matrix_cosine_search' missing"):
+        load_authoritative_latency_benchmark(incomplete_bench)
+
+
+def test_authoritative_json_files_pass_strict_validation():
+    """Verify committed authoritative JSON files pass strict validation."""
+    eval_data = load_authoritative_eval_summary()
     assert eval_data["benchmark_tests_count"] == 3
     assert eval_data["tests_passed"] == 3
     assert eval_data["pass_rate_percent"] == 100.0
 
-    metrics = eval_data["metrics_summary"]
-    for req_key in ["judge_faithfulness_score", "judge_completeness_score", "judge_policy_compliance_score", "judge_overall_quality_score", "overall_system_grade"]:
-        assert req_key in metrics, f"Missing key {req_key} in metrics_summary"
-
-    for r in eval_data["individual_results"]:
-        assert r["test_passed"] is True
-        assert r["decision_aligned"] is True
-        assert r["constraints_passed"] is True
-        assert r["loss_amount_verified"] is True
-        assert r["settlement_ceiling_verified"] is True
-
-    # Validate Latency Benchmark structure
-    assert "benchmark_timestamp" in bench_data
+    bench_data = load_authoritative_latency_benchmark()
     assert bench_data["environment"]["active_indexed_vectors"] == 2000
     assert bench_data["environment"]["embedding_dimension"] == 1536
-    benchmarks = bench_data["benchmarks"]
-    for b_key in ["vector_matrix_cosine_search", "bm25_keyword_search", "internal_hybrid_fusion", "end_to_end_hybrid_retrieval"]:
-        assert b_key in benchmarks
-        stats = benchmarks[b_key]["stats"]
-        assert all(k in stats for k in ["min_ms", "median_ms", "mean_ms", "p95_ms", "max_ms"])
