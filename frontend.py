@@ -175,7 +175,12 @@ with tab1:
             m1.metric("Priority Tier", triage["priority_tier"])
             m2.metric("Target SLA", f"{triage['target_sla_resolution_hours']} Hours")
             m3.metric("Fraud Risk Score", f"{risk['fraud_probability_percent']}%")
-            m4.metric("LLM-as-Judge Score", f"{judge['overall_quality_score']} / 10.0")
+            
+            # Dynamic labeling: Distinguish live LLM-as-Judge evaluation from deterministic fallback audit
+            is_live_llm = judge.get("judge_mode") == "rules_plus_llm"
+            judge_metric_label = "🤖 LLM Judge Score" if is_live_llm else "🛡️ Guardrail Score"
+            judge_help = "Evaluated via live OpenAI LLM critique + compliance rules." if is_live_llm else "Evaluated via deterministic rule-based & financial invariant checks (Offline Fallback Mode)."
+            m4.metric(judge_metric_label, f"{judge['overall_quality_score']} / 10.0", help=judge_help)
 
             # Helper to prevent KaTeX LaTeX math mode from corrupting currency text
             def safe_txt(t):
@@ -211,8 +216,11 @@ with tab1:
                     st.markdown(f"- [ ] {safe_txt(step)}")
                 st.markdown(f"**Executive Synthesis:** *{safe_txt(rec['executive_rationale'])}*")
 
-            # LLM-as-Judge Card
-            with st.expander("⚖️ Independent LLM-as-Judge Quality Audit", expanded=True):
+            # LLM-as-Judge vs Deterministic Guardrail Card
+            expander_title = "⚖️ Independent LLM-as-Judge Quality Audit (Live LLM Audited)" if is_live_llm else "⚖️ Deterministic Guardrail Quality Audit (Offline Fallback)"
+            with st.expander(expander_title, expanded=True):
+                mode_badge = "🟢 Live OpenAI LLM + Deterministic Guardrails" if is_live_llm else "🛡️ Offline Fallback: Deterministic Rules & Invariant Validation"
+                st.caption(f"**Audit Engine:** {mode_badge}")
                 st.write(f"**Verdict:** `{judge['verdict']}` | **Score:** `{judge['overall_quality_score']}/10.0`")
                 sc_col1, sc_col2, sc_col3 = st.columns(3)
                 sc_col1.metric("Factual Consistency", f"{judge['metric_scores']['factual_consistency']}/10")
