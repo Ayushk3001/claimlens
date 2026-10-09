@@ -1,8 +1,14 @@
 import os
+import sys
 import json
 from pathlib import Path
 from datetime import datetime, timezone
 from typing import List, Dict, Any
+
+# Ensure project root is in sys.path
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.agents.multi_agent_workflow import multi_agent_workflow
 from src.utils.guardrails import validate_claim_input
@@ -101,33 +107,53 @@ def run_evaluation_suite() -> Dict[str, Any]:
         raw_fraud = float(risk.get("fraud_probability_percent", 0.0))
         calibrated_fraud = float(ml.get("calibrated_fraud_probability_percent", raw_fraud))
 
-        # 3. Assert benchmark constraints independently
+        # 3. Assert benchmark constraints independently (strict validation of all declared conditions)
         decision_aligned = (rec["decision"] == tc["expected_action"])
 
-        prob_aligned = True
-        prob_notes = []
+        constraints_passed = True
+        constraint_notes = []
         if "max_calibrated_fraud_prob" in tc:
             if calibrated_fraud > tc["max_calibrated_fraud_prob"]:
-                prob_aligned = False
-                prob_notes.append(f"Calibrated prob {calibrated_fraud}% exceeded max {tc['max_calibrated_fraud_prob']}%")
+                constraints_passed = False
+                constraint_notes.append(f"Calibrated prob {calibrated_fraud}% exceeded max {tc['max_calibrated_fraud_prob']}%")
         if "max_raw_fraud_prob" in tc:
             if raw_fraud > tc["max_raw_fraud_prob"]:
-                prob_aligned = False
-                prob_notes.append(f"Raw prob {raw_fraud}% exceeded max {tc['max_raw_fraud_prob']}%")
+                constraints_passed = False
+                constraint_notes.append(f"Raw prob {raw_fraud}% exceeded max {tc['max_raw_fraud_prob']}%")
         if "min_raw_fraud_prob" in tc:
             if raw_fraud < tc["min_raw_fraud_prob"] and calibrated_fraud < 18.0:
-                prob_aligned = False
-                prob_notes.append(f"Raw prob {raw_fraud}% fell below min {tc['min_raw_fraud_prob']}%")
+                constraints_passed = False
+                constraint_notes.append(f"Raw prob {raw_fraud}% fell below min {tc['min_raw_fraud_prob']}%")
+        if "min_loss_amount" in tc:
+            claimed_amt = float(inp.get("claim_amount", 0.0))
+            if claimed_amt < tc["min_loss_amount"]:
+                constraints_passed = False
+                constraint_notes.append(f"Claim amount ${claimed_amt:,.2f} fell below required min_loss_amount ${tc['min_loss_amount']:,.2f}")
+            # Ensure recommendation recognizes this high-value loss and establishes proper net ceiling
+            expected_net_ceiling = max(0.0, round(claimed_amt - float(inp.get("deductible", 0.0)), 2))
+            if abs(rec.get("net_settlement_ceiling", 0.0) - expected_net_ceiling) > 0.01:
+                constraints_passed = False
+                constraint_notes.append(f"Net settlement ceiling (${rec.get('net_settlement_ceiling'):,.2f}) did not match expected (${expected_net_ceiling:,.2f})")
 
-        judge_passed = (judge["verdict"] == "PASS")
-        test_passed = bool(decision_aligned and prob_aligned and judge_passed)
+        judge_passed = (judge.get("verdict") == "PASS")
+        test_passed = bool(decision_aligned and constraints_passed and judge_passed)
 
-        # 4. Measured metric calculations from multi-agent judge scores
-        metric_scores = judge.get("metric_scores", {})
-        faithfulness = round(metric_scores.get("factual_consistency", 9.0) / 10.0, 4)
-        relevancy = round(metric_scores.get("completeness", 9.0) / 10.0, 4)
-        compliance = round(metric_scores.get("policy_compliance", 9.5) / 10.0, 4)
-        overall_quality = round(judge.get("overall_quality_score", 9.3) / 10.0, 4)
+        # 4. Measured metric calculations from multi-agent judge scores (NO silent fallbacks allowed)
+        metric_scores = judge.get("metric_scores")
+        if not metric_scores:
+            raise ValueError(f"Judge output for {tc['test_id']} is missing 'metric_scores'. Fallback scores are disallowed.")
+
+        for req_metric in ("factual_consistency", "completeness", "policy_compliance"):
+            if req_metric not in metric_scores:
+                raise ValueError(f"Judge output for {tc['test_id']} is missing required metric '{req_metric}'.")
+
+        if "overall_quality_score" not in judge:
+            raise ValueError(f"Judge output for {tc['test_id']} is missing 'overall_quality_score'.")
+
+        faithfulness = round(metric_scores["factual_consistency"] / 10.0, 4)
+        relevancy = round(metric_scores["completeness"] / 10.0, 4)
+        compliance = round(metric_scores["policy_compliance"] / 10.0, 4)
+        overall_quality = round(judge["overall_quality_score"] / 10.0, 4)
 
         faithfulness_scores.append(faithfulness)
         relevancy_scores.append(relevancy)
@@ -142,8 +168,9 @@ def run_evaluation_suite() -> Dict[str, Any]:
             "decision_aligned": decision_aligned,
             "raw_fraud_probability_percent": raw_fraud,
             "calibrated_fraud_probability_percent": calibrated_fraud,
-            "probability_constraints_passed": prob_aligned,
-            "probability_constraint_notes": prob_notes,
+            "constraints_passed": constraints_passed,
+            "constraint_notes": constraint_notes,
+            "loss_amount_verified": (float(inp.get("claim_amount", 0.0)) >= tc.get("min_loss_amount", 0.0)),
             "judge_verdict": judge["verdict"],
             "judge_overall_score": judge["overall_quality_score"],
             "test_passed": test_passed,
@@ -152,7 +179,7 @@ def run_evaluation_suite() -> Dict[str, Any]:
             "compliance": compliance
         })
         print(f" -> Decision: {rec['decision']} (Expected: {tc['expected_action']}) | Match: {decision_aligned}")
-        print(f" -> Raw Fraud: {raw_fraud}% | Calibrated Fraud: {calibrated_fraud}% (Valid: {prob_aligned})")
+        print(f" -> Raw Fraud: {raw_fraud}% | Calibrated Fraud: {calibrated_fraud}% (Valid Constraints: {constraints_passed})")
         print(f" -> Judge Verdict: {judge['verdict']} (Score: {judge['overall_quality_score']}/10) | Passed: {test_passed}")
 
     avg_faithfulness = round(sum(faithfulness_scores) / len(faithfulness_scores), 4)
@@ -179,16 +206,19 @@ def run_evaluation_suite() -> Dict[str, Any]:
 
     summary = {
         "evaluation_timestamp": dynamic_timestamp,
-        "evaluation_framework": "DeepEval & LLM-as-Judge Benchmark",
+        "evaluation_framework": "LLM-as-Judge & Deterministic Invariant Auditing",
+        "methodology_notes": "Scores are derived from multi-agent LLM Judge evaluations (factual consistency, completeness, and financial policy adherence) combined with deterministic underwriting invariant verification. No static fallback scores are utilized.",
         "benchmark_tests_count": total_tests,
         "tests_passed": passed_tests,
         "pass_rate_percent": round(pass_rate * 100, 1),
         "metrics_summary": {
-            "deepeval_faithfulness": avg_faithfulness,
-            "deepeval_answer_relevancy": avg_relevancy,
+            "faithfulness": avg_faithfulness,
+            "answer_relevancy": avg_relevancy,
             "underwriting_policy_compliance": avg_compliance,
             "llm_as_judge_quality_score": avg_judge,
-            "overall_system_grade": overall_grade
+            "overall_system_grade": overall_grade,
+            "deepeval_faithfulness": avg_faithfulness,
+            "deepeval_answer_relevancy": avg_relevancy
         },
         "individual_results": test_results
     }
@@ -196,8 +226,8 @@ def run_evaluation_suite() -> Dict[str, Any]:
     print("\n" + "=" * 60)
     print("EVALUATION SUMMARY SCORES:")
     print(f"  • Benchmark Pass Rate:         {passed_tests}/{total_tests} ({pass_rate * 100:.1f}%)")
-    print(f"  • DeepEval Faithfulness:        {avg_faithfulness * 100:.1f}%")
-    print(f"  • DeepEval Answer Relevancy:    {avg_relevancy * 100:.1f}%")
+    print(f"  • Faithfulness:                {avg_faithfulness * 100:.1f}%")
+    print(f"  • Relevancy / Completeness:    {avg_relevancy * 100:.1f}%")
     print(f"  • Policy Compliance:           {avg_compliance * 100:.1f}%")
     print(f"  • LLM-as-Judge Quality Score:   {avg_judge * 10:.1f} / 10.0")
     print(f"  • Overall System Grade:        {overall_grade}")

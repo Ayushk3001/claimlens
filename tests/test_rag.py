@@ -57,3 +57,32 @@ def test_hybrid_search_metadata_amount_and_prev_claims_filtering():
         min_amount=1000000.0  # $1,000,000 floor exceeds all sample claims
     )
     assert len(excluded_results) == 0, "Expected zero results for $1M min_amount exclusion test"
+
+def test_deterministic_fallback_embedding_behavior():
+    """Verify that deterministic fallback embeddings produce unit-normalized vectors with reproducible values."""
+    import numpy as np
+
+    text_a = "Rear bumper collision in parking lot minor dent paint scrape"
+    text_b = "Total commercial warehouse fire loss suspected electrical failure"
+
+    vec_a1 = embedding_service._fallback_embedding(text_a)
+    vec_a2 = embedding_service._fallback_embedding(text_a)
+    vec_b = embedding_service._fallback_embedding(text_b)
+
+    # 1. Determinism assertion: identical input yields exact bit-level identical vector
+    assert vec_a1 == vec_a2, "Fallback embedding must be completely deterministic for identical text"
+
+    # 2. Dimensionality assertion
+    assert len(vec_a1) == 1536
+    assert len(vec_b) == 1536
+
+    # 3. Unit L2 norm assertion (normalized cosine vector)
+    norm_a = float(np.linalg.norm(vec_a1))
+    norm_b = float(np.linalg.norm(vec_b))
+    assert abs(norm_a - 1.0) < 1e-4, f"Fallback vector norm {norm_a} is not unit normalized"
+    assert abs(norm_b - 1.0) < 1e-4, f"Fallback vector norm {norm_b} is not unit normalized"
+
+    # 4. Non-trivial distinction between different texts
+    dot_prod = float(np.dot(vec_a1, vec_b))
+    assert dot_prod < 0.99, f"Different text inputs produced unexpectedly identical vectors (cosine sim: {dot_prod})"
+

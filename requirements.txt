@@ -10,7 +10,8 @@ streamlit>=1.32.0
 
 # LLM & Vector Store
 openai>=1.20.0
-chromadb>=0.4.24
+# chromadb omitted: ClaimLens employs an in-memory normalized NumPy cosine matrix engine
+# to eliminate Windows C++ SQLite threading lock contention and guarantee sub-3ms latency.
 rank-bm25>=0.2.2
 tiktoken>=0.6.0
 

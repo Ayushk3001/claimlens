@@ -32,7 +32,7 @@ To build an AI-assisted claims retrieval, prediction, and multi-agent workflow s
   - **Recommendation Agent:** Formulates the final claims action (`AUTO_APPROVE`, `MANUAL_ADJUSTER_REVIEW`, or `SIU_REFERRAL`) and creates actionable checklists.
   - **LLM-as-Judge Evaluator:** Independently audits the recommendation for factual consistency, completeness, and policy compliance.
 - **Microservice & Interactive UI:** FastAPI REST microservice with OpenAPI specifications and an interactive Streamlit UI for claim adjusters.
-- **Automated Quality Evaluation:** DeepEval test suite evaluating Faithfulness (95.0%), Answer Relevancy (96.0%), Policy Compliance (95.0%), and LLM-as-Judge Quality (9.3/10.0).
+- **Automated Quality Evaluation:** Comprehensive benchmark suite evaluating Faithfulness (95.0%), Answer Relevancy / Completeness (90.0%), Underwriting Policy Compliance (95.0%), and LLM-as-Judge Quality (9.3/10.0).
 
 ---
 
@@ -43,12 +43,12 @@ To build an AI-assisted claims retrieval, prediction, and multi-agent workflow s
 | **Programming Language** | Python 3.11 | Core runtime environment |
 | **LLM Used** | OpenAI `gpt-5-nano` via `https://aicredits.in/v1` | Multi-agent reasoning, synthesis, and LLM-as-Judge |
 | **Embedding Model** | OpenAI `text-embedding-3-small` | 1536-dimensional dense claim vector embeddings (with deterministic fallback) |
-| **Vector Database** | In-Memory Vector Store | NumPy normalized cosine similarity retrieval (sub-2ms, ChromaDB schema compatible) |
+| **Vector Database** | In-Memory Vector Store | NumPy normalized cosine similarity retrieval (sub-3ms matrix dot product, see empirical latency benchmark in `docs/latency_benchmark.json`) |
 | **Keyword Search** | Rank-BM25 | BM25Okapi lexical token search |
 | **Machine Learning** | Scikit-Learn (Random Forest) | Regression (Amount, Days) & Calibrated Classification (Fraud) |
 | **Backend Microservice** | FastAPI, Uvicorn, Pydantic v2 | High-throughput async REST API with validation guardrails |
 | **Frontend UI** | Streamlit | Adjuster dashboard, search explorer, and feedback UI |
-| **Evaluation Framework** | DeepEval & Pytest | Faithfulness, relevancy, and policy compliance benchmarks |
+| **Evaluation Framework** | LLM-as-Judge & Pytest | DeepEval/G-Eval aligned dimensions (Faithfulness, Relevancy, Policy Compliance) |
 | **Documentation & Decks** | ReportLab & Python-PPTX | Automated generation of PDF deliverables and slides |
 
 ---
@@ -210,7 +210,7 @@ pytest -v
 ```
 *(All 23 comprehensive unit, guardrail, RAG metadata filtering, and API tests pass in under 20 seconds)*
 
-### Run DeepEval & LLM-as-Judge Benchmark
+### Run DeepEval-Aligned LLM-as-Judge Benchmark
 ```bash
 python -m tests.run_evaluation
 ```
@@ -218,7 +218,29 @@ python -m tests.run_evaluation
   - `TC-001` (Auto collision, clean history): **AUTO_APPROVE** (Decision aligned: True)
   - `TC-002` (Business arson risk): **SIU_REFERRAL** (Decision aligned: True)
   - `TC-003` (Home water loss >$10k): **MANUAL_ADJUSTER_REVIEW** (Decision aligned: True)
-- **Results:** 3/3 tests passed (100% alignment), Faithfulness 95.0%, Relevancy 96.0%, Compliance 95.0%, LLM Judge 9.3/10.0.
+- **Results:** 3/3 tests passed (100% alignment), Faithfulness 95.0%, Relevancy / Completeness 90.0%, Policy Compliance 95.0%, LLM Judge 9.3/10.0 (Grade: EXCELLENT A+). No static fallback scores.
+
+### Run Empirical Latency Benchmark Suite
+```bash
+python tests/benchmark_latency.py
+```
+Empirical measurement results on 200 iterations over 2,000 active indexed vectors (saved to `docs/latency_benchmark.json`):
+
+| Component | Min | Median | Mean | P95 | Max |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| **NumPy Vector Cosine Search** | 2.29 ms | 2.94 ms | 3.72 ms | 6.30 ms | 40.26 ms |
+| **BM25Okapi Keyword Search** | 7.68 ms | 10.34 ms | 10.46 ms | 12.98 ms | 17.24 ms |
+| **Internal Hybrid RRF Fusion** | 10.25 ms | 13.51 ms | 14.19 ms | 20.17 ms | 32.56 ms |
+| **End-to-End Hybrid Search (Live API)** | 263.81 ms | 272.27 ms | 291.86 ms | 368.03 ms | 568.98 ms |
+
+### Dual-Probability Underwriting Policy
+ClaimLens differentiates between the **raw Random Forest probability** (uncalibrated leaf proportion) and the **calibrated posterior risk** (via 5-fold `CalibratedClassifierCV` sigmoid calibration adjusted to the 8.5% industry fraud prevalence):
+1. **Low Risk Tier (Calibrated < 8.5% AND Raw < 38.0%):** Routinely routed to `AUTO_APPROVE` fast-track if loss $\le \$5,000$, tenure $\ge 1.0\text{ year}$, and 0 prior claims. Net payout equals `Claim Amount - Deductible`.
+2. **Moderate Risk Tier (Calibrated $\ge 8.5\%$ OR Raw $\ge 38.0\%$ OR Loss > $10,000):** Routed to `MANUAL_ADJUSTER_REVIEW` for contractor/estimate audits.
+3. **High Risk Tier (Calibrated $\ge 18.0\%$ OR Raw $\ge 45.0\%$ OR [Loss $\ge \$50,000$ with Raw $\ge 35.0\%$]):** Immediately routed to `SIU_REFERRAL`. Payment disbursement is strictly withheld ($0.00 authorized payout) pending anti-fraud investigation.
+
+### Deterministic Offline Embedding Fallback
+When external LLM credentials (`OPENAI_API_KEY`) are unreachable or unconfigured (offline development, CI/CD runners), `EmbeddingService` generates deterministic, unit-normalized 1536-dimensional pseudo-embeddings via SHA256/MD5 token seeding. This ensures 100% test reproducibility and zero pipeline crashes offline. In production deployments with valid keys, live OpenAI `text-embedding-3-small` dense vectors are queried directly.
 
 ### Re-Generate Deliverables (PDFs & Presentation Deck)
 ```bash

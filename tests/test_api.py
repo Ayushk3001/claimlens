@@ -1,8 +1,24 @@
 import pytest
+from pathlib import Path
 from fastapi.testclient import TestClient
 from src.main import app
+from src.services.feedback_service import feedback_service
 
 client = TestClient(app)
+
+@pytest.fixture(autouse=True)
+def preserve_feedback_store():
+    """Ensure feedback tests never permanently pollute data/feedback_store.json."""
+    fb_file = feedback_service.feedback_file
+    initial_content = fb_file.read_text(encoding="utf-8") if fb_file.exists() else None
+    try:
+        yield
+    finally:
+        if initial_content is not None:
+            fb_file.write_text(initial_content, encoding="utf-8")
+        elif fb_file.exists():
+            fb_file.unlink()
+
 
 def test_health_endpoint():
     response = client.get("/health")

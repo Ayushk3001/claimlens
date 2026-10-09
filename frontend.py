@@ -224,7 +224,7 @@ with tab1:
 
 # ================= TAB 2: Hybrid Search & Precedents =================
 with tab2:
-    st.subheader("Hybrid Claims Retrieval (ChromaDB Vector + BM25 Keyword Search)")
+    st.subheader("Hybrid Claims Retrieval (In-Memory Vector Cosine + BM25 Keyword Search)")
     search_q = st.text_input("Enter natural language query or loss scenario", value="Auto accident rear-end damage collision repair")
     
     sc1, sc2, sc3 = st.columns(3)

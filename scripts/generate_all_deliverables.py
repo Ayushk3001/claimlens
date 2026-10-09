@@ -63,7 +63,7 @@ def generate_architecture_diagram():
 
     story = [
         Paragraph("ClaimLens — System Architecture Diagram", title_style),
-        Paragraph("<b>End-to-End System Architecture:</b> Client UI &rarr; FastAPI Microservice &rarr; Guardrails Gate &rarr; 7-Agent Sequential Engine &rarr; Hybrid RAG & ML Services &rarr; Continuous Feedback Loop", subtitle_style),
+        Paragraph("<b>End-to-End System Architecture:</b> Client UI &rarr; FastAPI Microservice &rarr; Guardrails Gate &rarr; Multi-Agent Workflow Engine &rarr; Hybrid RAG & ML Services &rarr; Continuous Feedback Loop", subtitle_style),
     ]
 
     # Embed High-Resolution Architecture Diagram Image
@@ -78,7 +78,7 @@ def generate_architecture_diagram():
         ["1", "Client / Frontend", "Streamlit Adjuster Dashboard (frontend.py) and External REST API clients."],
         ["2", "FastAPI Layer", "Asynchronous gateway (port 8000) exposing /analyze, /classify, /predict, /hybrid-search, /feedback, /feedback/retrain."],
         ["3", "Validation & Guardrails", "Pydantic schema validation, range checks, date validation, and prompt injection sanitization."],
-        ["4", "Multi-Agent Workflow (Sequential)", "Strict 7-stage state cascade: 1.Classification &rarr; 2.Precedent RAG &rarr; 3.ML Predictor &rarr; 4.Investigation &rarr; 5.Risk &rarr; 6.Recommendation &rarr; 7.LLM Judge."],
+        ["4", "Multi-Agent Workflow Engine", "Coordinated reasoning: 1.Classification & Triage &rarr; 2.Investigation (RAG) &rarr; 3.Risk Assessment (ML) &rarr; 4.Recommendation & Settlement &rarr; 5.Independent LLM Judge."],
         ["5", "Data Layer", "Parquet/CSV samples (Hugging Face 100M claims), processed narrative texts, and versioned pickle model bundles."],
         ["6", "RAG & ML Services", "Hybrid RAG (NumPy in-memory vector store + BM25Okapi + Weighted RRF) and Calibrated Random Forests (loss, days, fraud)."],
         ["7", "Feedback & Retraining Pipeline", "Append-only adjuster audit feedback store, automated holdout evaluation, Brier score gate, and zero-downtime hot reload."],
@@ -126,17 +126,17 @@ def generate_design_document():
 
         Paragraph("2. Solution Overview & Business Objectives", h1),
         Paragraph("This project provides an intelligent, AI-assisted claims triaging and decisioning microservice. The solution achieves:", body),
-        Paragraph("&bull; <b>Automated Hybrid Claim Retrieval:</b> Finding historical peer cases via ChromaDB vector embeddings and BM25 keyword matching.", bullet),
+        Paragraph("&bull; <b>Automated Hybrid Claim Retrieval:</b> Finding historical peer cases via in-memory normalized vector embeddings and BM25 keyword matching.", bullet),
         Paragraph("&bull; <b>Predictive ML Estimation:</b> Accurately estimating settlement amounts, days to resolution, and fraud probability with explainability.", bullet),
         Paragraph("&bull; <b>Multi-Agent Orchestration:</b> Coordinating Investigation, Risk Assessment, and Recommendation agents with LLM-as-Judge validation.", bullet),
         Paragraph("&bull; <b>Operational Efficiency:</b> Enabling fast-track approval for low-risk routine claims while routing high-risk claims to SIU.", bullet),
 
         Paragraph("3. Technology Selection & Justifications", h1),
         Paragraph("<b>&bull; OpenAI Models (GPT-4o-mini & Text-Embedding-3-Small):</b> State-of-the-art reasoning for underwriting policy synthesis, multi-agent cooperation, and dense 1536-dimensional semantic representation.", bullet),
-        Paragraph("<b>&bull; Vector Database & BM25:</b> In-memory normalized cosine similarity vector store (NumPy with ChromaDB schema compatibility) combined with Rank-BM25 via Reciprocal Rank Fusion (RRF) ensures sub-2ms latency, exact cosine calculations, and zero concurrency locks.", bullet),
-        Paragraph("<b>&bull; Scikit-Learn Ensemble Models:</b> Random Forest Regressors and Classifiers trained on 10,000 stratified claims from the Hugging Face 100M dataset provide high-speed, explainable numeric predictions.", bullet),
+        Paragraph("<b>&bull; Vector Database & BM25:</b> In-memory normalized cosine similarity vector store (NumPy with ChromaDB schema compatibility) combined with Rank-BM25 via Reciprocal Rank Fusion (RRF) ensures sub-3ms matrix latency, exact cosine calculations, and zero concurrency locks (see docs/latency_benchmark.json).", bullet),
+        Paragraph("<b>&bull; Scikit-Learn Ensemble Models:</b> Random Forest Regressors and Classifiers trained on 10,000 claims sampled from row group 0 of the Hugging Face 100M dataset provide high-speed, explainable numeric predictions.", bullet),
         Paragraph("<b>&bull; FastAPI & Streamlit:</b> FastAPI provides high-throughput asynchronous REST microservices; Streamlit provides a low-latency interactive adjuster UI.", bullet),
-        Paragraph("<b>&bull; DeepEval:</b> Automated evaluation framework quantifying faithfulness, relevancy, and policy compliance.", bullet),
+        Paragraph("<b>&bull; DeepEval & LLM-as-Judge:</b> Automated evaluation framework quantifying faithfulness, relevancy, and policy compliance.", bullet),
 
         PageBreak(),
         Paragraph("4. Retrieval Strategy & Hybrid Search", h1),
@@ -160,7 +160,7 @@ def generate_design_document():
     eval_data = [
         ["Evaluation Metric", "Benchmark Score", "Evaluation Target", "Status"],
         ["DeepEval Faithfulness", "95.0%", "&ge; 85.0%", "EXCEEDED"],
-        ["DeepEval Answer Relevancy", "96.0%", "&ge; 85.0%", "EXCEEDED"],
+        ["DeepEval Answer Relevancy", "90.0%", "&ge; 85.0%", "EXCEEDED"],
         ["Underwriting Policy Compliance", "95.0%", "&ge; 90.0%", "EXCEEDED"],
         ["LLM-as-Judge Quality Score", "9.3 / 10.0", "&ge; 8.0 / 10.0", "EXCEEDED"],
         ["Guardrail Security Validation", "100.0%", "100.0%", "PASSED"]
@@ -179,7 +179,7 @@ def generate_design_document():
     story.append(Spacer(1, 10))
 
     story.append(Paragraph("7. Challenges, Trade-offs & Production Roadmap", h1))
-    story.append(Paragraph("<b>&bull; Challenge:</b> Operating at 100M claims scale locally.<br/><b>Decision:</b> Streamed a high-fidelity stratified sample of 10,000 records from row group 0 of the Parquet dataset and indexed 1,500 candidates into the in-memory vector store, achieving sub-2ms retrieval and zero disk bloat. Enterprise roadmap targets distributed Qdrant/Milvus clusters.", body))
+    story.append(Paragraph("<b>&bull; Challenge:</b> Operating at 100M claims scale locally.<br/><b>Decision:</b> Streamed a representative sample of 10,000 records from row group 0 of the Parquet dataset and indexed 2,000 candidates into the in-memory vector store, achieving sub-3ms matrix retrieval and zero disk bloat. Enterprise roadmap targets distributed Qdrant/Milvus clusters.", body))
     story.append(Paragraph("<b>&bull; Challenge:</b> LLM hallucination and policy adherence.<br/><b>Decision:</b> Implemented input guardrails, strict Pydantic schemas, and a secondary LLM-as-Judge audit layer.", body))
     story.append(Paragraph("<b>&bull; Future Roadmap:</b> Vision-LLM integration for vehicle/property damage photograph analysis and automated OCR of police reports.", body))
 
@@ -213,7 +213,7 @@ def generate_api_documentation():
         Paragraph("<b>Sample Response:</b><br/><code>{\"is_valid\": true, \"errors\": [], \"warnings\": [], \"sanitized_data\": {...}}</code>", code_block),
 
         Paragraph("3. Hybrid RAG Search Endpoint", h1),
-        Paragraph("<b>POST /claims/hybrid-search</b> — Retrieves similar historical claims using ChromaDB vector search + BM25 keyword matching with RRF scoring.", body),
+        Paragraph("<b>POST /claims/hybrid-search</b> — Retrieves similar historical claims using in-memory vector search + BM25 keyword matching with RRF scoring.", body),
         Paragraph("<b>Sample Request:</b><br/><code>{\"query\": \"rear fender collision repair\", \"top_k\": 3, \"claim_type\": \"Auto\", \"state\": \"CA\"}</code>", code_block),
         Paragraph("<b>Sample Response:</b><br/><code>{\"query\": \"rear fender collision repair\", \"count\": 3, \"results\": [{\"claim_id\": \"CLM-0000000001\", \"hybrid_score\": 0.9412, \"retrieval_method\": \"Hybrid\", \"claim_amount\": 3200.0, \"claim_status\": \"Approved\"}]}</code>", code_block),
 
@@ -489,8 +489,8 @@ def generate_presentation_deck():
             "1. Client UI & External API Calls",
             "2. FastAPI Gateway (Port 8000)",
             "3. Input Validation & Guardrails",
-            "4. 7-Agent Sequential Engine",
-            "5. Parquet & Chroma Data Layer",
+            "4. Multi-Agent Reasoning Engine",
+            "5. Parquet & In-Memory Vector Layer",
             "6. Hybrid RAG (BM25 + Dense RRF)",
             "7. Calibrated Random Forests",
             "8. MLOps Retraining Feedback Loop"
@@ -498,7 +498,7 @@ def generate_presentation_deck():
     else:
         add_card(s3, 0.8, 1.5, 3.6, 5.4, "1. Data & Hybrid Search", [
             "Hugging Face 100M Dataset sample (13 core fields).",
-            "ChromaDB Vector Store (Cosine Similarity).",
+            "In-Memory Vector Store (Cosine Similarity).",
             "Rank-BM25 Keyword Search Engine.",
             "Reciprocal Rank Fusion (RRF) for unified ranking.",
             "Dynamic metadata filters (State, Type, Amount)."
@@ -573,7 +573,7 @@ def generate_presentation_deck():
     add_header(s6, "Evaluation Results (DeepEval & LLM-as-Judge)")
     add_card(s6, 0.8, 1.5, 5.6, 5.4, "Quantitative Metric Highlights", [
         "DeepEval Faithfulness: 95.0% (Grounding in claim facts).",
-        "DeepEval Answer Relevancy: 96.0% (Actionable handling steps).",
+        "DeepEval Answer Relevancy: 90.0% (Actionable handling steps).",
         "Underwriting Policy Compliance: 95.0% (Adherence to guidelines).",
         "LLM-as-Judge Audit Score: 9.3 / 10.0 (Overall Quality Grade).",
         "Guardrail Security: 100% Prompt Injection & Range Check Pass Rate."

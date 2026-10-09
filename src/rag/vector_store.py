@@ -88,7 +88,7 @@ class ClaimVectorStore:
 
     def search(
         self,
-        query: str,
+        query: Any,
         top_k: int = 10,
         where_filter: Optional[Dict[str, Any]] = None
     ) -> List[Dict[str, Any]]:
@@ -96,8 +96,12 @@ class ClaimVectorStore:
         if self.count() == 0 or self.embedding_matrix is None:
             return []
 
-        # Generate normalized query vector
-        query_vec = np.array(embedding_service.get_embedding(query), dtype=np.float32)
+        # Generate or unpack normalized query vector
+        if isinstance(query, (list, np.ndarray)):
+            query_vec = np.array(query, dtype=np.float32)
+        else:
+            query_vec = np.array(embedding_service.get_embedding(str(query)), dtype=np.float32)
+
         q_norm = np.linalg.norm(query_vec)
         if q_norm > 0:
             query_vec /= q_norm

@@ -1,0 +1,61 @@
+{
+  "benchmark_timestamp": "2026-10-09T07:25:33Z",
+  "environment": {
+    "os": "Windows-10-10.0.26200-SP0",
+    "python_version": "3.11.3",
+    "cpu_architecture": "AMD64",
+    "processor": "Intel64 Family 6 Model 154 Stepping 4, GenuineIntel",
+    "active_indexed_vectors": 2000,
+    "embedding_dimension": 1536
+  },
+  "benchmarks": {
+    "vector_matrix_cosine_search": {
+      "description": "In-memory normalized NumPy cosine matrix dot product ((N, D) @ (D,)) + top-k partition",
+      "iterations": 200,
+      "stats": {
+        "min_ms": 2.295,
+        "median_ms": 2.937,
+        "mean_ms": 3.719,
+        "p95_ms": 6.304,
+        "p99_ms": 10.473,
+        "max_ms": 40.259
+      }
+    },
+    "bm25_keyword_search": {
+      "description": "Rank-BM25 tokenization and scoring across claim narrative corpus",
+      "iterations": 200,
+      "stats": {
+        "min_ms": 7.684,
+        "median_ms": 10.339,
+        "mean_ms": 10.463,
+        "p95_ms": 12.977,
+        "p99_ms": 14.447,
+        "max_ms": 17.238
+      }
+    },
+    "internal_hybrid_fusion": {
+      "description": "Vector dot product + BM25 score merge via Reciprocal Rank Fusion (excluding network)",
+      "iterations": 200,
+      "stats": {
+        "min_ms": 10.25,
+        "median_ms": 13.506,
+        "mean_ms": 14.194,
+        "p95_ms": 20.169,
+        "p99_ms": 26.958,
+        "max_ms": 32.559
+      }
+    },
+    "end_to_end_hybrid_retrieval": {
+      "description": "Full pipeline: Query string -> Embedding Service -> Vector Search + BM25 -> RRF top-5",
+      "iterations": 15,
+      "stats": {
+        "min_ms": 263.812,
+        "median_ms": 272.267,
+        "mean_ms": 291.856,
+        "p95_ms": 368.026,
+        "p99_ms": 528.792,
+        "max_ms": 568.983
+      }
+    }
+  }
+}

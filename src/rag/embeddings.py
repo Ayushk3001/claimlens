@@ -24,12 +24,24 @@ class EmbeddingService:
                 self.client = None
 
     def _fallback_embedding(self, text: str) -> List[float]:
-        """Generate deterministic normalized dense 1536-dim embedding vector based on text hashing."""
+        """Generate deterministic normalized dense 1536-dim pseudo-embedding based on text hashing.
+
+        ARCHITECTURAL SPECIFICATION & LIMITATIONS:
+        This fallback mechanism provides deterministic 1536-dimensional vectors when the external 
+        OpenAI API is unreachable, offline, or running in an unconfigured test/eval environment.
+        It guarantees 100% test reproducibility and uninterrupted offline execution without crashing.
+
+        Operational Limitation: While cryptographic hashing (MD5/SHA256) and token modulation provide
+        stable vector dimensionality and unit L2 norms, this is a synthetic heuristic designed for 
+        offline pipeline continuity, NOT genuine deep semantic text representation. In production 
+        deployments with valid API credentials, live OpenAI text-embedding-3-small dense embeddings 
+        are invoked directly.
+        """
         seed = int(hashlib.md5(text.encode("utf-8")).hexdigest()[:8], 16)
         rng = np.random.RandomState(seed)
         vec = rng.randn(self.dimension).astype(np.float32)
         
-        # Modulate slightly by token keywords for semantic clustering
+        # Modulate slightly by token keywords for synthetic clustering
         tokens = text.lower().split()
         for idx, token in enumerate(tokens[:30]):
             tok_seed = int(hashlib.sha256(token.encode("utf-8")).hexdigest()[:8], 16)
