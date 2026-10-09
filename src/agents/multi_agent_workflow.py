@@ -181,11 +181,24 @@ class MultiAgentClaimsWorkflow:
                     "Review emergency water mitigation or structural remediation invoices.",
                     "Confirm date of loss aligns with regional weather and municipal service logs."
                 ]
-            else:
+            elif c_type in ["Renters", "Tenant"]:
+                steps = [
+                    "Request bank statements, purchase records, or past photos to establish ownership and value for un-receipted personal belongings.",
+                    "Verify electronics (laptop and TV) replacement estimates against Actual Cash Value (ACV) depreciation tables.",
+                    "Review plumber repair invoice and cross-reference with landlord building maintenance logs to verify origin of water damage.",
+                    f"Apply policy deductible of ${deductible:,.2f} against the audited contents loss total."
+                ]
+            elif c_type in ["Business", "Commercial"]:
                 steps = [
                     "Request CPA-verified commercial loss records, equipment receipts, and business interruption logs.",
                     f"Review deductible application (${deductible:,.2f}) against commercial casualty limits.",
                     "Obtain vendor invoices and incident reports to verify business property ownership."
+                ]
+            else:
+                steps = [
+                    "Obtain licensed contractor or vendor repair estimates and loss photographs.",
+                    f"Verify deductible application (${deductible:,.2f}) against policy terms.",
+                    "Review proof of loss and ownership documentation for claimed items."
                 ]
         else:
             decision = "AUTO_APPROVE"
