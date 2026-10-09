@@ -42,6 +42,17 @@ class ClaimsMLService:
                 
         df_clean["filing_delay_days"] = df_clean.apply(calc_delay, axis=1)
         
+        # Support deductible / policy_deductible alias and ensure fallback
+        if "deductible" not in df_clean.columns:
+            if "policy_deductible" in df_clean.columns:
+                df_clean["deductible"] = df_clean["policy_deductible"]
+            else:
+                df_clean["deductible"] = 500.0
+        if "policyholder_tenure_years" not in df_clean.columns:
+            df_clean["policyholder_tenure_years"] = 3.0
+        if "previous_claims_count" not in df_clean.columns:
+            df_clean["previous_claims_count"] = 0
+            
         # Categorical features
         cat_cols = ["claim_type"]
         num_cols = [
@@ -255,6 +266,7 @@ class ClaimsMLService:
             "estimated_amount_range": f"${amount_lower:,.2f} - ${amount_upper:,.2f}",
             "predicted_days_to_resolution": predicted_days,
             "fraud_probability_percent": composite_fraud_score,
+            "composite_fraud_score": composite_fraud_score,
             "raw_ml_fraud_score": fraud_risk_score,
             "policy_risk_adjustment": policy_risk_bump,
             "calibrated_fraud_probability_percent": calibrated_fraud_score,
