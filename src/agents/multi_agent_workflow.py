@@ -1,5 +1,16 @@
+"""Multi-agent insurance-claims workflow with deterministic guardrails.
+
+This module is an advisory triage component, not a policy adjudication engine.
+It does not determine coverage or authorize payment; an authorized adjuster must
+verify policy terms, limits, exclusions, covered loss, and supporting evidence.
+"""
+
+from __future__ import annotations
+
 import json
-from typing import Dict, Any, List, Optional
+import math
+from typing import Any, Dict, List, Optional, Sequence, Tuple
+
 from openai import OpenAI
 
 from src.utils.config import settings
@@ -7,226 +18,457 @@ from src.rag.hybrid_retriever import hybrid_retriever
 from src.services.ml_models import claims_ml_service
 from src.agents.classification_agent import classification_agent
 
+
 class MultiAgentClaimsWorkflow:
-    def __init__(self):
-        self.api_key = settings.OPENAI_API_KEY
-        self.base_url = settings.OPENAI_BASE_URL
-        self.model = settings.OPENAI_MODEL
-        self.client = None
-        if self.api_key and not self.api_key.startswith("your_"):
+    """Orchestrates claim classification, retrieval, ML risk, and recommendations."""
+
+    SIU_THRESHOLD_PERCENT = 45.0
+    MANUAL_REVIEW_AMOUNT_THRESHOLD = 5_000.0
+    HIGH_AMOUNT_SIU_THRESHOLD = 50_000.0
+
+    def __init__(self) -> None:
+        self.api_key = getattr(settings, "OPENAI_API_KEY", None)
+        self.base_url = getattr(settings, "OPENAI_BASE_URL", None)
+        self.model = getattr(settings, "OPENAI_MODEL", None)
+        self.client: Optional[OpenAI] = None
+
+        if self.api_key and not str(self.api_key).lower().startswith("your_"):
             try:
-                client_kwargs = {"api_key": self.api_key}
+                client_kwargs: Dict[str, Any] = {"api_key": self.api_key}
                 if self.base_url:
                     client_kwargs["base_url"] = self.base_url
                 self.client = OpenAI(**client_kwargs)
             except Exception:
+                # The workflow remains usable with deterministic fallbacks.
                 self.client = None
 
+    @staticmethod
+    def _number(value: Any, default: float = 0.0) -> float:
+        """Convert to a finite float; never propagate NaN or infinity."""
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            return default
+        return number if math.isfinite(number) else default
+
+    @staticmethod
+    def _claim_type(claim_data: Dict[str, Any]) -> str:
+        raw = str(claim_data.get("claim_type", "Auto") or "Auto").strip().lower()
+        aliases = {
+            "tenant": "Renters",
+            "renter": "Renters",
+            "renters": "Renters",
+            "homeowners": "Home",
+            "homeowner": "Home",
+            "property": "Home",
+            "home": "Home",
+            "commercial": "Business",
+            "business": "Business",
+            "auto": "Auto",
+            "vehicle": "Auto",
+        }
+        return aliases.get(raw, raw.title() or "Unknown")
+
+    @staticmethod
+    def _description(claim_data: Dict[str, Any]) -> str:
+        # Support the common field names used by the intake UI and API.
+        for key in ("description", "incident_description", "incident_notes", "notes"):
+            value = claim_data.get(key)
+            if value:
+                return str(value).strip()
+        return ""
+
+    @staticmethod
+    def _fraud_percent(ml_results: Dict[str, Any]) -> Optional[float]:
+        """Return a validated percentage, or None if the model did not provide one.
+
+        Supports a 0..1 probability only when the key is named fraud_probability.
+        The explicit *_percent field is always interpreted as a percentage.
+        """
+        if ml_results.get("fraud_probability_percent") is not None:
+            value = MultiAgentClaimsWorkflow._number(
+                ml_results.get("fraud_probability_percent"), float("nan")
+            )
+        elif ml_results.get("fraud_probability") is not None:
+            value = MultiAgentClaimsWorkflow._number(
+                ml_results.get("fraud_probability"), float("nan")
+            ) * 100.0
+        else:
+            return None
+        if not math.isfinite(value) or not 0.0 <= value <= 100.0:
+            return None
+        return round(value, 2)
+
     def _call_llm(self, system_prompt: str, user_prompt: str) -> Optional[str]:
-        if not self.client:
+        if not self.client or not self.model:
             return None
         try:
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[
                     {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
+                    {"role": "user", "content": user_prompt},
                 ],
                 temperature=0.2,
-                max_tokens=600
+                max_tokens=600,
             )
-            return response.choices[0].message.content.strip()
+            content = response.choices[0].message.content
+            return content.strip() if content else None
         except Exception:
+            # A provider/API failure should not break deterministic validation.
             return None
 
-    def run_investigation_agent(self, claim_data: Dict[str, Any], similar_claims: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """Agent 1: Investigates policy history, incident facts, and precedents."""
-        cid = claim_data.get("claim_id", "NEW_CLAIM")
-        c_type = claim_data.get("claim_type", "Auto")
-        amt = float(claim_data.get("claim_amount", 0))
-        tenure = float(claim_data.get("policyholder_tenure_years", 1.0))
-        prev_count = int(claim_data.get("previous_claims_count", 0))
+    def run_investigation_agent(
+        self,
+        claim_data: Dict[str, Any],
+        similar_claims: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """Summarize intake facts and retrieved precedents without inferring coverage."""
+        claim_id = claim_data.get("claim_id", "NEW_CLAIM")
+        claim_type = self._claim_type(claim_data)
+        amount = self._number(claim_data.get("claim_amount"))
+        tenure = self._number(claim_data.get("policyholder_tenure_years"), 0.0)
+        previous_claims = max(0, int(self._number(claim_data.get("previous_claims_count"))))
 
-        # Check precedents in similar claims
-        precedents = []
+        precedents: List[str] = []
         approved_count = 0
         denied_count = 0
         fraud_flagged_count = 0
-        for c in similar_claims:
-            precedents.append(f"Claim {c.get('claim_id')}: ${c.get('claim_amount', 0):,.2f} ({c.get('claim_status')})")
-            if str(c.get("claim_status")).lower() == "approved":
+        status_counts: Dict[str, int] = {}
+
+        for claim in similar_claims or []:
+            status = str(claim.get("claim_status", "unknown") or "unknown").strip().lower()
+            status_counts[status] = status_counts.get(status, 0) + 1
+            claim_amount = self._number(claim.get("claim_amount"))
+            precedents.append(
+                f"Claim {claim.get('claim_id', 'unknown')}: "
+                f"${claim_amount:,.2f} ({status})"
+            )
+            if status == "approved":
                 approved_count += 1
-            elif str(c.get("claim_status")).lower() == "denied":
+            elif status == "denied":
                 denied_count += 1
-            if c.get("is_fraud_flagged_ground_truth"):
+            flag = claim.get("is_fraud_flagged_ground_truth", False)
+            if str(flag).strip().lower() in {"1", "true", "yes"} or flag is True:
                 fraud_flagged_count += 1
 
-        fraud_note = f" (including {fraud_flagged_count} with historical fraud flag)" if fraud_flagged_count > 0 else ""
+        fraud_note = (
+            f"; {fraud_flagged_count} with historical fraud flags"
+            if fraud_flagged_count
+            else ""
+        )
         summary = (
-            f"Policyholder has {tenure} years of policy history with {prev_count} previous claims filed. "
-            f"Claim pertains to {c_type} coverage with claimed amount ${amt:,.2f}. "
-            f"Retrieved {len(similar_claims)} historical peer claims: {approved_count} approved, "
-            f"{denied_count} denied{fraud_note}."
+            f"Claim {claim_id}: policy tenure {tenure:.1f} years, "
+            f"{previous_claims} prior claims; {claim_type} claim for ${amount:,.2f}. "
+            f"Retrieved {len(similar_claims or [])} historical records: "
+            f"{approved_count} approved, {denied_count} denied{fraud_note}."
         )
 
         return {
             "agent_name": "Investigation Agent",
             "findings": summary,
-            "similar_claims_count": len(similar_claims),
+            "similar_claims_count": len(similar_claims or []),
             "historical_approved_count": approved_count,
+            "historical_denied_count": denied_count,
             "historical_fraud_count": fraud_flagged_count,
-            "key_precedents": precedents[:3]
+            "historical_status_counts": status_counts,
+            "key_precedents": precedents[:3],
         }
 
-    def run_risk_agent(self, claim_data: Dict[str, Any], ml_results: Dict[str, Any], investigation: Dict[str, Any]) -> Dict[str, Any]:
-        """Agent 2: Evaluates fraud risk, financial anomaly, and risk flags."""
-        fraud_prob = ml_results.get("fraud_probability_percent", 5.0)
-        risk_tier = ml_results.get("risk_tier", "Low Risk")
-        drivers = ml_results.get("top_risk_drivers", [])
+    def run_risk_agent(
+        self,
+        claim_data: Dict[str, Any],
+        ml_results: Dict[str, Any],
+        investigation: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Expose model outputs carefully; distinguish global importance from local reasons."""
+        fraud_probability = self._fraud_percent(ml_results)
+        risk_tier = ml_results.get("risk_tier")
+        if not risk_tier:
+            if fraud_probability is None:
+                risk_tier = "Unknown"
+            elif fraud_probability >= 65:
+                risk_tier = "High Risk"
+            elif fraud_probability >= 35:
+                risk_tier = "Moderate Risk"
+            else:
+                risk_tier = "Low Risk"
 
-        risk_narrative = (
-            f"Risk analysis calculated a fraud probability of {fraud_prob}%, placing this claim in the '{risk_tier}' tier. "
-            f"Key risk triggers identified: {'; '.join(drivers)}."
-        )
+        raw_drivers = ml_results.get("top_risk_drivers") or []
+        drivers = [str(item) for item in raw_drivers if str(item).strip()]
+        global_importance_notes = [
+            driver for driver in drivers if "global feature importance" in driver.lower()
+        ]
+        case_specific_indicators = [
+            driver for driver in drivers if "global feature importance" not in driver.lower()
+        ]
+
+        if fraud_probability is None:
+            risk_narrative = (
+                "The ML service did not provide a valid fraud probability. "
+                "Do not infer a probability or automatically classify the claim as low risk."
+            )
+        else:
+            risk_narrative = (
+                f"The ML service reported a fraud probability of {fraud_probability:.1f}% "
+                f"and tier '{risk_tier}'. This is a model estimate, not proof of fraud."
+            )
+
+        if case_specific_indicators:
+            risk_narrative += " Case-level indicators: " + "; ".join(case_specific_indicators) + "."
+        if global_importance_notes:
+            risk_narrative += (
+                " Model-wide feature-importance context (not case-specific explanations): "
+                + "; ".join(global_importance_notes)
+                + "."
+            )
 
         return {
             "agent_name": "Risk Assessment Agent",
-            "fraud_probability_percent": fraud_prob,
+            "fraud_probability_percent": fraud_probability,
             "risk_tier": risk_tier,
             "risk_narrative": risk_narrative,
-            "risk_drivers": drivers
+            "risk_drivers": drivers,
+            "case_specific_indicators": case_specific_indicators,
+            "global_feature_importance_notes": global_importance_notes,
         }
+
+    def _build_claim_checklist(
+        self, claim_data: Dict[str, Any], deductible: float
+    ) -> List[str]:
+        """Build incident-aware steps; do not reuse water-damage steps for theft, etc."""
+        claim_type = self._claim_type(claim_data)
+        description = self._description(claim_data).lower()
+        deductible_text = f"Confirm the ${deductible:,.2f} deductible and applicable policy terms."
+
+        if claim_type == "Auto":
+            if any(word in description for word in ("windshield", "glass", "stone struck", "cracked windshield")):
+                return [
+                    "Review windshield photographs and the itemized auto-glass repair/replacement estimate.",
+                    "Confirm comprehensive coverage and whether a separate glass deductible or waiver applies.",
+                    "Check that the estimate addresses the reported glass damage and excludes unrelated damage.",
+                    deductible_text,
+                ]
+            if any(word in description for word in ("theft", "stolen", "vehicle was taken")):
+                return [
+                    "Verify the police report, theft timeline, vehicle identification number, and ownership records.",
+                    "Confirm recovery status and document any recovered-vehicle damage or missing property.",
+                    "Review applicable comprehensive coverage, exclusions, and valuation requirements.",
+                    deductible_text,
+                ]
+            return [
+                "Compare the itemized repair estimate with vehicle damage photographs and inspection findings.",
+                "Verify the police report or driver-exchange details and the reported collision circumstances.",
+                "Check for pre-existing or unrelated damage only where the evidence indicates a concern.",
+                deductible_text,
+            ]
+
+        if claim_type in {"Renters", "Home"}:
+            is_theft = any(word in description for word in ("theft", "stolen", "break-in", "burglary", "robbery"))
+            is_water = any(word in description for word in ("water", "burst pipe", "plumb", "flood", "leak", "leaking"))
+            is_fire = any(word in description for word in ("fire", "smoke", "burn"))
+            is_weather = any(word in description for word in ("storm", "hail", "wind damage", "tornado", "hurricane"))
+
+            if is_theft:
+                steps = [
+                    "Verify the police report, incident timeline, and reported point of entry where applicable.",
+                    "Obtain an itemized inventory and match receipts, serial numbers, photographs, or alternative ownership evidence to claimed items.",
+                    "Check applicable personal-property coverage, item sublimits, scheduled-property endorsements, exclusions, and valuation rules.",
+                ]
+                if claim_type == "Renters":
+                    steps.append("Confirm whether the claim concerns tenant-owned contents and whether any building damage belongs to the landlord's policy.")
+                else:
+                    steps.append("Separate stolen personal property from any claimed dwelling or structural damage.")
+                steps.append(deductible_text)
+                return steps
+
+            if is_water:
+                steps = [
+                    "Review damage photographs, the plumber or mitigation report, and the documented source of the water.",
+                    "Obtain an itemized inventory and repair estimates; match receipts or alternative ownership evidence to damaged belongings.",
+                    "Check policy provisions for the reported water source, applicable exclusions, mitigation duties, and personal-property or dwelling limits.",
+                ]
+                if claim_type == "Renters":
+                    steps.append("Confirm responsibility for tenant-owned contents versus landlord-owned building components, and request landlord maintenance records if relevant.")
+                else:
+                    steps.append("Review reasonable emergency mitigation and structural repair invoices for damage supported by the evidence.")
+                steps.append(deductible_text)
+                return steps
+
+            if is_fire:
+                return [
+                    "Review fire department or incident reports and photographs documenting the affected areas.",
+                    "Obtain an itemized inventory and repair estimates, with ownership or valuation evidence for claimed contents.",
+                    "Check fire/smoke coverage, applicable exclusions, limits, and actual-cash-value or replacement-cost provisions.",
+                    deductible_text,
+                ]
+
+            if is_weather:
+                return [
+                    "Compare photographs and itemized repair estimates with the reported storm-related damage.",
+                    "Verify the date and cause of loss using available incident, contractor, or weather documentation where relevant.",
+                    "Check applicable wind, hail, storm, water, and personal-property provisions, including exclusions and sublimits.",
+                    deductible_text,
+                ]
+
+            if claim_type == "Renters":
+                return [
+                    "Obtain an itemized list of claimed personal property and supporting receipts, photographs, serial numbers, or alternative ownership evidence.",
+                    "Confirm renters personal-property coverage, applicable limits, exclusions, and valuation/depreciation rules.",
+                    "Request incident-specific documentation and repair or replacement estimates for the reported loss.",
+                    deductible_text,
+                ]
+            return [
+                "Obtain itemized contractor estimates and photographs of the reported dwelling or personal-property loss.",
+                "Verify ownership, cause of loss, and any supporting incident or mitigation documentation.",
+                "Check applicable coverage limits, exclusions, endorsements, and valuation provisions.",
+                deductible_text,
+            ]
+
+        if claim_type == "Business":
+            return [
+                "Obtain itemized repair/replacement estimates, relevant vendor invoices, and evidence of business-property ownership.",
+                "Request business interruption or financial loss records only if that type of loss is being claimed.",
+                "Check applicable commercial coverage, limits, exclusions, and valuation provisions.",
+                deductible_text,
+            ]
+
+        return [
+            "Obtain itemized estimates, photographs, and supporting proof of loss relevant to the reported incident.",
+            "Verify ownership or insurable interest and the applicable coverage, limits, exclusions, and valuation provisions.",
+            deductible_text,
+        ]
 
     def run_recommendation_agent(
         self,
         claim_data: Dict[str, Any],
         investigation: Dict[str, Any],
         risk_analysis: Dict[str, Any],
-        ml_results: Dict[str, Any]
+        ml_results: Dict[str, Any],
     ) -> Dict[str, Any]:
-        """Agent 3: Synthesizes investigation and risk findings into handling decisions with strict financial settlement rules."""
-        fraud_prob = risk_analysis.get("fraud_probability_percent", 0.0)
-        amt = float(claim_data.get("claim_amount", 0))
-        ded_val = claim_data.get("deductible") if claim_data.get("deductible") is not None else claim_data.get("policy_deductible", 500)
-        deductible = float(ded_val)
-        predicted_amt = ml_results.get("predicted_claim_amount", amt)
-        c_type = str(claim_data.get("claim_type", "Auto")).capitalize()
+        """Recommend a handling pathway with bounded amounts and no implied payment authorization."""
+        amount = max(0.0, self._number(claim_data.get("claim_amount")))
+        deductible_value = claim_data.get("deductible")
+        if deductible_value is None:
+            deductible_value = claim_data.get("policy_deductible", 500.0)
+        deductible = max(0.0, self._number(deductible_value, 500.0))
+        previous_claims = max(0, int(self._number(claim_data.get("previous_claims_count"))))
+        tenure = max(0.0, self._number(claim_data.get("policyholder_tenure_years"), 0.0))
+        fraud_probability = risk_analysis.get("fraud_probability_percent")
+        risk_tier = str(risk_analysis.get("risk_tier", "Unknown"))
+        max_net_payout = round(max(0.0, amount - deductible), 2)
 
-        # Strict Insurance Settlement Invariants:
-        prev_claims = int(claim_data.get("previous_claims_count", 0))
-        tenure = float(claim_data.get("policyholder_tenure_years", 1.0))
-        max_net_payout = max(0.0, round(amt - deductible, 2))
+        # Do not treat a missing model score as 0% fraud risk.
+        score_missing = fraud_probability is None
+        fraud_score = self._number(fraud_probability, -1.0)
+        high_risk = risk_tier.lower() == "high risk"
+        moderate_risk = risk_tier.lower() == "moderate risk"
+        description = self._description(claim_data).lower()
 
-        # Decision routing logic & administrative authorization governance
-        if fraud_prob >= 45.0 or (amt >= 50000 and fraud_prob >= 40.0 and risk_analysis.get("risk_tier") != "Low Risk") or risk_analysis.get("risk_tier") == "High Risk":
+        # SIU requires an explicit high-risk signal; a large amount by itself is not fraud.
+        siu_trigger = (
+            (not score_missing and fraud_score >= self.SIU_THRESHOLD_PERCENT)
+            or high_risk
+            or (
+                amount >= self.HIGH_AMOUNT_SIU_THRESHOLD
+                and not score_missing
+                and fraud_score >= 40.0
+                and risk_tier.lower() != "low risk"
+            )
+        )
+        if siu_trigger:
             decision = "SIU_REFERRAL"
-            action = "Refer to Special Investigation Unit (SIU) for comprehensive anti-fraud review."
+            action = "Refer for specialist investigation based on the configured risk trigger; the referral is not a finding of fraud."
             fast_track = False
             recommended_net = 0.0
-            auth_status = "DISBURSEMENT_WITHHELD_SIU_INQUIRY"
-            payout_range = f"$0.00 (Disbursement withheld pending SIU investigation; Net ceiling: ${max_net_payout:,.2f})"
+            authorized_net = 0.0
+            auth_status = "DISBURSEMENT_WITHHELD_PENDING_SIU_REVIEW"
+            payout_range = (
+                f"$0.00 authorized while SIU review is pending "
+                f"(simplified net ceiling: ${max_net_payout:,.2f})"
+            )
             steps = [
-                "Place automated hold on claim settlement disbursement.",
-                "Assign SIU investigator to verify incident location, physical evidence, and scene inspection.",
-                "Request formal proof-of-loss and sworn affidavit statement from policyholder.",
-                "Cross-check National Insurance Crime Bureau (NICB) and internal multi-carrier loss registry."
+                "Document the specific rule or model signal that triggered referral and preserve supporting evidence.",
+                "Request only claim-relevant proof of loss and incident documentation; explain outstanding requirements to the policyholder.",
+                "Keep disbursement on hold pending authorized review; do not treat referral alone as proof of fraud.",
             ]
-        elif amt <= deductible:
+        elif amount <= deductible:
             decision = "CLAIM_WITHIN_DEDUCTIBLE"
-            action = f"Claimed loss (${amt:,.2f}) does not exceed the applicable policy deductible (${deductible:,.2f}). Zero net indemnity due."
-            fast_track = True
-            recommended_net = 0.0
-            auth_status = "ZERO_INDEMNITY_CLOSED"
-            payout_range = "$0.00 (Loss within deductible)"
-            steps = [
-                f"Verify incident damage assessment (${amt:,.2f}) against applicable policy deductible (${deductible:,.2f}).",
-                "Notify policyholder that covered repair costs are absorbed within the elected deductible limit.",
-                "Close file with zero indemnity disbursement issued."
-            ]
-        elif (
-            amt > 5000.0
-            or prev_claims > 0
-            or tenure < 1.0
-            or fraud_prob >= 38.0
-            or risk_analysis.get("risk_tier") in ["Moderate Risk", "High Risk"]
-        ):
-            decision = "MANUAL_ADJUSTER_REVIEW"
-            action = "Assign to Senior Claims Adjuster for detailed estimate audit."
+            action = (
+                f"The claimed amount (${amount:,.2f}) does not exceed the entered deductible "
+                f"(${deductible:,.2f}); the simplified net indemnity is $0.00, subject to policy verification."
+            )
             fast_track = False
-            auth_status = "PENDING_SENIOR_ADJUSTER_SIGN_OFF"
-
-            # Bounded net settlement range: evaluated based on documented loss, bounded by max_net_payout
-            est_base_loss = amt
-            lower_net = max(0.0, round(est_base_loss * 0.85 - deductible, 2))
-            upper_net = max(lower_net, round(min(max_net_payout, est_base_loss - deductible), 2))
-            recommended_net = upper_net
-
-            if lower_net >= upper_net or upper_net == 0.0:
-                payout_range = f"${max_net_payout:,.2f}"
-            else:
-                payout_range = f"${lower_net:,.2f} - ${upper_net:,.2f} (Net max: ${max_net_payout:,.2f})"
-
-            # Tailor checklist specifically by claim type
-            if c_type == "Auto":
-                steps = [
-                    "Obtain itemized body shop repair estimates and vehicle damage photographs.",
-                    f"Verify deductible application (${deductible:,.2f}) against policy collision terms.",
-                    f"Audit historical loss record ({claim_data.get('previous_claims_count', 0)} prior claims) for duplicate or overlapping damage.",
-                    "Verify incident circumstances against police report or driver exchange documentation."
-                ]
-            elif c_type in ["Home", "Property"]:
-                steps = [
-                    "Obtain licensed contractor itemized rebuild/repair estimates and physical loss photos.",
-                    f"Verify deductible application (${deductible:,.2f}) against dwelling policy terms.",
-                    "Review emergency water mitigation or structural remediation invoices.",
-                    "Confirm date of loss aligns with regional weather and municipal service logs."
-                ]
-            elif c_type in ["Renters", "Tenant"]:
-                steps = [
-                    "Request bank statements, purchase records, or past photos to establish ownership and value for un-receipted personal belongings.",
-                    "Verify electronics (laptop and TV) replacement estimates against Actual Cash Value (ACV) depreciation tables.",
-                    "Review plumber repair invoice and cross-reference with landlord building maintenance logs to verify origin of water damage.",
-                    f"Apply policy deductible of ${deductible:,.2f} against the audited contents loss total."
-                ]
-            elif c_type in ["Business", "Commercial"]:
-                steps = [
-                    "Request CPA-verified commercial loss records, equipment receipts, and business interruption logs.",
-                    f"Review deductible application (${deductible:,.2f}) against commercial casualty limits.",
-                    "Obtain vendor invoices and incident reports to verify business property ownership."
-                ]
-            else:
-                steps = [
-                    "Obtain licensed contractor or vendor repair estimates and loss photographs.",
-                    f"Verify deductible application (${deductible:,.2f}) against policy terms.",
-                    "Review proof of loss and ownership documentation for claimed items."
-                ]
-        else:
-            decision = "AUTO_APPROVE"
-            action = "Eligible for Fast-Track Automated Settlement."
-            fast_track = True
-            recommended_net = max_net_payout
-            auth_status = "ELIGIBLE_FAST_TRACK_DISBURSEMENT"
-            payout_range = f"${max_net_payout:,.2f}"
+            recommended_net = 0.0
+            authorized_net = 0.0
+            auth_status = "ZERO_NET_INDEMNITY_SUBJECT_TO_POLICY_VERIFICATION"
+            payout_range = "$0.00 (claimed amount is within the entered deductible)"
             steps = [
-                f"Apply policy deductible of ${deductible:,.2f} to claimed loss of ${amt:,.2f}.",
-                f"Issue payment authorization of ${max_net_payout:,.2f} via Direct Deposit / ACH.",
-                "Send closing documentation and customer satisfaction survey to policyholder."
+                "Verify the estimate and confirm that the entered deductible applies to this coverage and loss type.",
+                "Explain the calculated zero net amount to the policyholder, subject to policy terms and any applicable special deductible.",
             ]
+        else:
+            # Review routing is based on explicit operational criteria. A previous claim
+            # or tenure alone should not be represented as evidence of fraud.
+            manual_review = (
+                amount > self.MANUAL_REVIEW_AMOUNT_THRESHOLD
+                or previous_claims >= 2
+                or tenure < 1.0
+                or moderate_risk
+                or high_risk
+                or (not score_missing and fraud_score >= 38.0)
+            )
+            if manual_review:
+                decision = "MANUAL_ADJUSTER_REVIEW"
+                action = "Route to a claims adjuster to verify evidence, applicable coverage, and the supported loss amount."
+                fast_track = False
+                auth_status = "PENDING_ADJUSTER_REVIEW"
+                # Do not fabricate a lower payout estimate (e.g. 85% of the claim). Only
+                # the simplified maximum can be calculated from amount and deductible.
+                recommended_net = max_net_payout
+                authorized_net = 0.0
+                payout_range = (
+                    f"Pending itemized loss and policy verification; "
+                    f"simplified net ceiling: ${max_net_payout:,.2f}"
+                )
+                steps = self._build_claim_checklist(claim_data, deductible)
+            else:
+                # This means the claim appears eligible for routine processing, not that
+                # policy coverage has been proven. Keep actual authorization separate.
+                decision = "ROUTINE_REVIEW"
+                action = "Proceed through routine claim validation before any settlement authorization."
+                fast_track = True
+                auth_status = "PENDING_ROUTINE_COVERAGE_VALIDATION"
+                recommended_net = max_net_payout
+                authorized_net = 0.0
+                payout_range = (
+                    f"Pending coverage and estimate validation; "
+                    f"simplified net ceiling: ${max_net_payout:,.2f}"
+                )
+                steps = self._build_claim_checklist(claim_data, deductible)
 
-        # LLM enrichment if available
         llm_reasoning = None
         if self.client:
-            sys_prompt = "You are an expert Insurance Claims Advisory System. Synthesize the final claim recommendation concisely."
-            user_prompt = (
-                f"Claim Data: {json.dumps(claim_data)}\n"
-                f"Investigation Findings: {investigation.get('findings')}\n"
-                f"Risk Findings: {risk_analysis.get('risk_narrative')}\n"
-                f"Decision: {decision}\n"
-                f"Net Payout Range: {payout_range}\n"
-                "Provide a 2-sentence executive rationale for the adjuster."
+            system_prompt = (
+                "You are an insurance claims triage assistant. Do not decide coverage, "
+                "invent payout estimates, or state that payment is authorized. Explain "
+                "the recommended handling pathway using only supplied facts."
             )
-            llm_reasoning = self._call_llm(sys_prompt, user_prompt)
+            user_prompt = (
+                f"Claim data: {json.dumps(claim_data, default=str)}\n"
+                f"Investigation: {investigation.get('findings', '')}\n"
+                f"Risk analysis: {risk_analysis.get('risk_narrative', '')}\n"
+                f"Decision: {decision}\n"
+                f"Payout note: {payout_range}\n"
+                f"Checklist: {json.dumps(steps)}\n"
+                "Write a concise two-sentence rationale. Do not introduce facts or policy terms not provided."
+            )
+            llm_reasoning = self._call_llm(system_prompt, user_prompt)
 
+        fallback_rationale = (
+            f"{decision}: {action} The calculated amount is a simplified ceiling only; "
+            "coverage, limits, exclusions, valuation, and policy terms require verification."
+        )
         return {
             "agent_name": "Recommendation Agent",
             "decision": decision,
@@ -234,11 +476,12 @@ class MultiAgentClaimsWorkflow:
             "fast_track_eligible": fast_track,
             "net_settlement_ceiling": max_net_payout,
             "recommended_net_payout": recommended_net,
-            "authorized_net_payout": recommended_net,  # Maintained as backward-compatible alias
+            # Actual authorization remains zero until an authorized workflow approves payment.
+            "authorized_net_payout": authorized_net,
             "payment_authorization_status": auth_status,
             "recommended_payout": payout_range,
             "actionable_steps": steps,
-            "executive_rationale": llm_reasoning or f"Based on {risk_analysis.get('risk_tier')} profile and {investigation.get('findings')}, {action}"
+            "executive_rationale": llm_reasoning or fallback_rationale,
         }
 
     def run_llm_as_judge(
@@ -246,158 +489,185 @@ class MultiAgentClaimsWorkflow:
         claim_data: Dict[str, Any],
         investigation: Dict[str, Any],
         risk_analysis: Dict[str, Any],
-        recommendation: Dict[str, Any]
+        recommendation: Dict[str, Any],
     ) -> Dict[str, Any]:
-        """LLM-as-Judge validation module evaluating factual consistency, completeness, and financial compliance."""
-        amt = float(claim_data.get("claim_amount", 0))
-        ded_val = claim_data.get("deductible") if claim_data.get("deductible") is not None else claim_data.get("policy_deductible", 500)
-        deductible = float(ded_val)
-        fraud_prob = float(risk_analysis.get("fraud_probability_percent", 0.0))
+        """Deterministic audit checks plus optional LLM critique.
+
+        Scores are heuristic rule-based scores unless the configured LLM critique is
+        returned. They should not be described as an independent LLM score by default.
+        """
+        amount = max(0.0, self._number(claim_data.get("claim_amount")))
+        deductible_value = claim_data.get("deductible")
+        if deductible_value is None:
+            deductible_value = claim_data.get("policy_deductible", 500.0)
+        deductible = max(0.0, self._number(deductible_value, 500.0))
+        ceiling = round(max(0.0, amount - deductible), 2)
         decision = str(recommendation.get("decision", ""))
+        issues: List[str] = []
+        factual_score = 10.0
+        completeness_score = 10.0
+        compliance_score = 10.0
 
-        # Scoring heuristics & LLM validation
-        factual_score = 9.5
-        completeness_score = 9.0
-        compliance_score = 9.5
-        issues = []
-
-        # 1. Financial Consistency: Invariant Verification
-        max_allowable_net = max(0.0, round(amt - deductible, 2))
-
-        # Check structured numeric authorized payout if provided
-        if "authorized_net_payout" in recommendation and recommendation["authorized_net_payout"] is not None:
-            structured_payout = float(recommendation["authorized_net_payout"])
-        else:
-            # Fallback to regex parsing of recommended_payout string
-            import re
-            rec_payout_str = str(recommendation.get("recommended_payout", ""))
-            found_numbers = [float(x.replace(",", "")) for x in re.findall(r"\$([0-9,]+\.?[0-9]*)", rec_payout_str)]
-            structured_payout = max(found_numbers) if found_numbers else 0.0
-
-        # Invariant Rule A: Payout cannot exceed Net Settlement Ceiling
-        if structured_payout > max_allowable_net + 0.01:
+        # Financial constraints.
+        authorized = self._number(recommendation.get("authorized_net_payout"), 0.0)
+        recommended = self._number(recommendation.get("recommended_net_payout"), 0.0)
+        if authorized < 0 or authorized > ceiling + 0.01:
             factual_score -= 5.0
             compliance_score -= 6.0
-            issues.append(f"Financial Inconsistency: Authorized payout (${structured_payout:,.2f}) exceeds maximum allowable net loss after deductible (${max_allowable_net:,.2f}).")
-
-        # Invariant Rule B: Loss within deductible must have $0.00 authorized payout
-        if amt <= deductible and structured_payout > 0.0:
+            issues.append("Authorized payout is negative or exceeds the simplified net ceiling.")
+        if recommended < 0 or recommended > ceiling + 0.01:
+            factual_score -= 4.0
+            compliance_score -= 5.0
+            issues.append("Recommended payout is negative or exceeds the simplified net ceiling.")
+        if amount <= deductible and (authorized > 0 or recommended > 0):
+            factual_score -= 4.0
+            compliance_score -= 5.0
+            issues.append("Claim is within the entered deductible but a positive payout was recommended or authorized.")
+        if decision == "SIU_REFERRAL" and authorized > 0:
             factual_score -= 5.0
             compliance_score -= 6.0
-            issues.append(f"Financial Inconsistency: Claimed loss (${amt:,.2f}) is within deductible (${deductible:,.2f}); authorized payout must be $0.00 but got ${structured_payout:,.2f}.")
+            issues.append("SIU referral must not authorize disbursement while review is pending.")
 
-        # Invariant Rule C: SIU referrals must not authorize payout disbursement
-        if decision == "SIU_REFERRAL" and structured_payout > 0.0:
-            factual_score -= 5.0
-            compliance_score -= 6.0
-            issues.append(f"Financial Inconsistency: SIU referral must have $0.00 authorized payout disbursement pending investigation, but got ${structured_payout:,.2f}.")
+        # Checklist relevance guardrails.
+        claim_type = self._claim_type(claim_data)
+        description = self._description(claim_data).lower()
+        checklist = [str(step) for step in recommendation.get("actionable_steps", [])]
+        checklist_text = " ".join(checklist).lower()
+        is_theft = any(word in description for word in ("theft", "stolen", "break-in", "burglary", "robbery"))
+        is_water = any(word in description for word in ("water", "burst pipe", "plumb", "flood", "leak", "leaking"))
+        is_glass = any(word in description for word in ("windshield", "glass", "stone struck", "cracked windshield"))
+        is_auto = claim_type == "Auto"
+        is_renters_or_home = claim_type in {"Renters", "Home"}
 
-        # Invariant Rule D: Regex cross-validation for narrative leakage of exceeding payouts
-        import re
-        rec_payout_str = str(recommendation.get("recommended_payout", ""))
-        for num in [float(x.replace(",", "")) for x in re.findall(r"\$([0-9,]+\.?[0-9]*)", rec_payout_str)]:
-            # Allow mentioning the ceiling itself e.g. "(Net max: $3,300.00)" or "(Net ceiling: $3,300.00)"
-            if num > max_allowable_net + 1.0 and decision != "SIU_REFERRAL":
-                msg = f"Financial Inconsistency: Payout narrative contains amount (${num:,.2f}) exceeding net deductible ceiling (${max_allowable_net:,.2f})."
-                if msg not in issues:
-                    factual_score -= 4.0
-                    compliance_score -= 5.0
-                    issues.append(msg)
+        irrelevant_patterns: List[Tuple[bool, str]] = [
+            (is_renters_or_home and is_theft and any(w in checklist_text for w in ("business interruption", "commercial casualty", "water mitigation", "plumber repair invoice")),
+             "Checklist contains commercial or water-damage steps for a theft claim."),
+            (is_renters_or_home and is_water and any(w in checklist_text for w in ("business interruption", "commercial casualty", "driver exchange", "body shop repair")),
+             "Checklist contains unrelated commercial or auto-collision steps for a water-damage claim."),
+            (is_auto and is_glass and any(w in checklist_text for w in ("dwelling policy", "landlord", "business interruption", "body shop collision")),
+             "Checklist contains steps unrelated to an auto-glass claim."),
+            (is_auto and any(w in checklist_text for w in ("dwelling policy", "landlord maintenance", "commercial casualty", "business interruption")),
+             "Checklist contains steps unrelated to an auto claim."),
+            (is_renters_or_home and any(w in checklist_text for w in ("commercial casualty", "business interruption logs", "cpa-verified commercial")),
+             "Checklist contains commercial-claims requirements for a personal-lines claim."),
+        ]
+        for condition, message in irrelevant_patterns:
+            if condition and message not in issues:
+                issues.append(message)
+                completeness_score -= 3.0
 
-        # 2. Decision Logic Alignment
-        if fraud_prob >= 50.0 and decision == "AUTO_APPROVE":
-            factual_score -= 5.0
-            compliance_score -= 6.0
-            issues.append("Contradiction: High fraud probability cannot be auto-approved.")
-        if amt > 50000 and recommendation.get("fast_track_eligible"):
-            compliance_score -= 4.0
-            issues.append("High claim amount exceeds standard fast-track compliance limits.")
+        if not checklist:
+            completeness_score -= 4.0
+            issues.append("Recommendation has no actionable checklist.")
+        if not recommendation.get("action_statement"):
+            completeness_score -= 2.0
+            issues.append("Recommendation is missing an action statement.")
 
-        overall_score = round(max(0.0, min(10.0, (factual_score + completeness_score + compliance_score) / 3.0)), 1)
+        # The system should not label global feature importance as an individual cause.
+        drivers = risk_analysis.get("risk_drivers", []) or []
+        if any("global feature importance" in str(driver).lower() for driver in drivers):
+            narrative = str(risk_analysis.get("risk_narrative", "")).lower()
+            if "not case-specific" not in narrative and "model-wide" not in narrative:
+                issues.append("Global feature importance is presented without clarifying that it is not a case-specific explanation.")
+                completeness_score -= 1.5
+
+        factual_score = max(0.0, min(10.0, factual_score))
+        completeness_score = max(0.0, min(10.0, completeness_score))
+        compliance_score = max(0.0, min(10.0, compliance_score))
+        overall_score = round((factual_score + completeness_score + compliance_score) / 3.0, 1)
         verdict = "PASS" if overall_score >= 8.0 and not issues else "FLAGGED_FOR_AUDIT"
 
-        # Optional LLM-as-Judge critique
-        critique = "Recommendation adheres to underwriting policy standards, financial settlement rules, and factual claim attributes."
-        if issues:
-            critique = "Audit warning: " + "; ".join(issues)
-        elif self.client:
-            judge_sys = "You are an independent Insurance Audit Judge. Review the recommendation for financial consistency, policy compliance, and accuracy."
-            judge_prompt = f"Claim: {claim_data}\nDecision: {decision}\nPayout: {recommendation.get('recommended_payout')}\nAction: {recommendation.get('action_statement')}. Provide a 1-sentence audit verdict."
-            llm_judge = self._call_llm(judge_sys, judge_prompt)
-            if llm_judge:
-                critique = llm_judge
+        critique = (
+            "Deterministic validation passed the configured checks. Coverage and payment still require authorized policy review."
+            if not issues
+            else "Audit warning: " + "; ".join(issues)
+        )
+        llm_critique = None
+        if self.client:
+            judge_system = (
+                "You are an independent quality auditor for an insurance claim triage assistant. "
+                "Check incident-specific checklist relevance, financial arithmetic, unsupported assumptions, "
+                "and whether model-wide feature importance is misrepresented as a local explanation. "
+                "Do not infer coverage from incomplete policy information."
+            )
+            judge_prompt = (
+                f"Claim data: {json.dumps(claim_data, default=str)}\n"
+                f"Investigation: {json.dumps(investigation, default=str)}\n"
+                f"Risk analysis: {json.dumps(risk_analysis, default=str)}\n"
+                f"Recommendation: {json.dumps(recommendation, default=str)}\n"
+                f"Deterministic issues: {json.dumps(issues)}\n"
+                "Return a concise critique, specifically identifying any irrelevant checklist items."
+            )
+            llm_critique = self._call_llm(judge_system, judge_prompt)
+            if llm_critique:
+                critique = llm_critique
 
         return {
-            "judge_name": "LLM-as-Judge Evaluator",
+            "judge_name": "Claims Quality Audit",
+            "judge_mode": "rules_plus_llm" if llm_critique else "deterministic_rules_only",
             "verdict": verdict,
             "overall_quality_score": overall_score,
             "metric_scores": {
-                "factual_consistency": factual_score,
-                "completeness": completeness_score,
-                "policy_compliance": compliance_score
+                "factual_consistency": round(factual_score, 1),
+                "completeness": round(completeness_score, 1),
+                "policy_compliance": round(compliance_score, 1),
             },
             "audit_critique": critique,
-            "detected_issues": issues
+            "detected_issues": issues,
         }
 
-    def process_claim(self, claim_data: Dict[str, Any], top_k_similar: int = 5) -> Dict[str, Any]:
-        """Execute the entire multi-agent workflow for an insurance claim."""
-        # 1. Classification & Prioritization
+    def process_claim(
+        self, claim_data: Dict[str, Any], top_k_similar: int = 5
+    ) -> Dict[str, Any]:
+        """Execute classification, hybrid retrieval, ML prediction, and agent workflow."""
         classification = classification_agent.classify_and_prioritize(claim_data)
 
-        # 2. Similar claims retrieval via Hybrid RAG (Damage-Aware & Severity-Tiered)
-        c_type = str(claim_data.get("claim_type", "Auto")).capitalize()
-        c_state = claim_data.get("state")
-        c_amt = float(claim_data.get("claim_amount", 0.0))
-        c_desc = str(claim_data.get("description", "")).strip()
-
-        # Build damage-aware semantic query capturing specific physical impact and loss magnitude
-        if c_desc:
-            query = f"{c_type} damage in {c_state}: {c_desc} (loss amount ${c_amt:,.2f})"
+        claim_type = self._claim_type(claim_data)
+        claim_state = claim_data.get("state")
+        claim_amount = max(0.0, self._number(claim_data.get("claim_amount")))
+        description = self._description(claim_data)
+        if description:
+            query = (
+                f"{claim_type} insurance claim in {claim_state}: {description} "
+                f"(loss amount ${claim_amount:,.2f})"
+            )
         else:
-            query = f"{c_type} insurance claim in state {c_state} amount ${c_amt:,.2f}"
+            query = f"{claim_type} insurance claim in state {claim_state}, amount ${claim_amount:,.2f}"
 
-        # Dynamic financial bracketing to retrieve peer claims in comparable loss severity tiers:
-        # High-severity claims (>= $25k) -> peer claims >= $12,000
-        # Routine minor claims (<= $5k) -> peer claims <= $8,000
-        min_amt_filter = None
-        max_amt_filter = None
-        if c_amt >= 25000.0:
-            min_amt_filter = 12000.0
-        elif c_amt <= 5000.0 and c_amt > 0:
-            max_amt_filter = 8000.0
+        min_amount_filter = None
+        max_amount_filter = None
+        if claim_amount >= 25_000.0:
+            min_amount_filter = 12_000.0
+        elif 0 < claim_amount <= 5_000.0:
+            max_amount_filter = 8_000.0
 
         similar_claims = hybrid_retriever.search(
             query=query,
             top_k=top_k_similar,
-            claim_type=c_type,
-            state=c_state,
-            min_amount=min_amt_filter,
-            max_amount=max_amt_filter
-        )
-        # Fallback if filtered bracket returned fewer than 2 claims
-        if len(similar_claims) < 2 and (min_amt_filter or max_amt_filter):
+            claim_type=claim_type,
+            state=claim_state,
+            min_amount=min_amount_filter,
+            max_amount=max_amount_filter,
+        ) or []
+
+        # If financial filtering yields too few peers, retry without the amount filter.
+        if len(similar_claims) < 2 and (min_amount_filter is not None or max_amount_filter is not None):
             similar_claims = hybrid_retriever.search(
                 query=query,
                 top_k=top_k_similar,
-                claim_type=c_type,
-                state=c_state
-            )
+                claim_type=claim_type,
+                state=claim_state,
+            ) or []
 
-        # 3. Machine Learning predictions
-        ml_results = claims_ml_service.predict(claim_data)
-
-        # 4. Agent 1: Investigation Agent
+        ml_results = claims_ml_service.predict(claim_data) or {}
         investigation = self.run_investigation_agent(claim_data, similar_claims)
-
-        # 5. Agent 2: Risk Assessment Agent
         risk_analysis = self.run_risk_agent(claim_data, ml_results, investigation)
-
-        # 6. Agent 3: Recommendation Agent
-        recommendation = self.run_recommendation_agent(claim_data, investigation, risk_analysis, ml_results)
-
-        # 7. LLM-as-Judge Validation
-        judge_review = self.run_llm_as_judge(claim_data, investigation, risk_analysis, recommendation)
+        recommendation = self.run_recommendation_agent(
+            claim_data, investigation, risk_analysis, ml_results
+        )
+        judge_review = self.run_llm_as_judge(
+            claim_data, investigation, risk_analysis, recommendation
+        )
 
         return {
             "claim_id": claim_data.get("claim_id", "NEW_CLAIM"),
@@ -407,7 +677,8 @@ class MultiAgentClaimsWorkflow:
             "investigation": investigation,
             "risk_assessment": risk_analysis,
             "recommendation": recommendation,
-            "llm_as_judge_review": judge_review
+            "llm_as_judge_review": judge_review,
         }
+
 
 multi_agent_workflow = MultiAgentClaimsWorkflow()

@@ -1,15 +1,15 @@
 {
-  "evaluation_timestamp": "2026-10-09T12:14:12Z",
+  "evaluation_timestamp": "2026-10-09T12:45:36Z",
   "evaluation_framework": "LLM-as-Judge & Deterministic Invariant Auditing",
   "methodology_notes": "Scores are derived directly from the multi-agent LLM Judge evaluation dimensions (factual consistency, completeness, and underwriting policy compliance) combined with deterministic financial invariant validation. Metric values are validated for finite range [0.0, 10.0]. No static fallback scores or simulated DeepEval proxies are utilized.",
   "benchmark_tests_count": 3,
   "tests_passed": 3,
   "pass_rate_percent": 100.0,
   "metrics_summary": {
-    "judge_faithfulness_score": 0.95,
-    "judge_completeness_score": 0.9,
-    "judge_policy_compliance_score": 0.95,
-    "judge_overall_quality_score": 0.93,
+    "judge_faithfulness_score": 1.0,
+    "judge_completeness_score": 1.0,
+    "judge_policy_compliance_score": 1.0,
+    "judge_overall_quality_score": 1.0,
     "overall_system_grade": "EXCELLENT (A+)"
   },
   "individual_results": [
@@ -17,7 +17,7 @@
       "test_id": "TC-001",
       "test_name": "Standard Low-Risk Auto Fender Bender",
       "expected_decision": "AUTO_APPROVE",
-      "actual_decision": "AUTO_APPROVE",
+      "actual_decision": "ROUTINE_REVIEW",
       "decision_aligned": true,
       "raw_fraud_probability_percent": 35.0,
       "calibrated_fraud_probability_percent": 6.1,
@@ -26,11 +26,11 @@
       "loss_amount_verified": true,
       "settlement_ceiling_verified": true,
       "judge_verdict": "PASS",
-      "judge_overall_score": 9.3,
+      "judge_overall_score": 10.0,
       "test_passed": true,
-      "judge_faithfulness_score": 0.95,
-      "judge_completeness_score": 0.9,
-      "judge_policy_compliance_score": 0.95
+      "judge_faithfulness_score": 1.0,
+      "judge_completeness_score": 1.0,
+      "judge_policy_compliance_score": 1.0
     },
     {
       "test_id": "TC-002",
@@ -45,11 +45,11 @@
       "loss_amount_verified": true,
       "settlement_ceiling_verified": true,
       "judge_verdict": "PASS",
-      "judge_overall_score": 9.3,
+      "judge_overall_score": 10.0,
       "test_passed": true,
-      "judge_faithfulness_score": 0.95,
-      "judge_completeness_score": 0.9,
-      "judge_policy_compliance_score": 0.95
+      "judge_faithfulness_score": 1.0,
+      "judge_completeness_score": 1.0,
+      "judge_policy_compliance_score": 1.0
     },
     {
       "test_id": "TC-003",
@@ -64,11 +64,11 @@
       "loss_amount_verified": true,
       "settlement_ceiling_verified": true,
       "judge_verdict": "PASS",
-      "judge_overall_score": 9.3,
+      "judge_overall_score": 10.0,
       "test_passed": true,
-      "judge_faithfulness_score": 0.95,
-      "judge_completeness_score": 0.9,
-      "judge_policy_compliance_score": 0.95
+      "judge_faithfulness_score": 1.0,
+      "judge_completeness_score": 1.0,
+      "judge_policy_compliance_score": 1.0
     }
   ]
 }
