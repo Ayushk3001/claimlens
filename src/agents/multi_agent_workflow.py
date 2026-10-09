@@ -330,14 +330,44 @@ class MultiAgentClaimsWorkflow:
         # 1. Classification & Prioritization
         classification = classification_agent.classify_and_prioritize(claim_data)
 
-        # 2. Similar claims retrieval via Hybrid RAG
-        query = f"Claim type {claim_data.get('claim_type')} in state {claim_data.get('state')} amount {claim_data.get('claim_amount')}"
+        # 2. Similar claims retrieval via Hybrid RAG (Damage-Aware & Severity-Tiered)
+        c_type = str(claim_data.get("claim_type", "Auto")).capitalize()
+        c_state = claim_data.get("state")
+        c_amt = float(claim_data.get("claim_amount", 0.0))
+        c_desc = str(claim_data.get("description", "")).strip()
+
+        # Build damage-aware semantic query capturing specific physical impact and loss magnitude
+        if c_desc:
+            query = f"{c_type} damage in {c_state}: {c_desc} (loss amount ${c_amt:,.2f})"
+        else:
+            query = f"{c_type} insurance claim in state {c_state} amount ${c_amt:,.2f}"
+
+        # Dynamic financial bracketing to retrieve peer claims in comparable loss severity tiers:
+        # High-severity claims (>= $25k) -> peer claims >= $12,000
+        # Routine minor claims (<= $5k) -> peer claims <= $8,000
+        min_amt_filter = None
+        max_amt_filter = None
+        if c_amt >= 25000.0:
+            min_amt_filter = 12000.0
+        elif c_amt <= 5000.0 and c_amt > 0:
+            max_amt_filter = 8000.0
+
         similar_claims = hybrid_retriever.search(
             query=query,
             top_k=top_k_similar,
-            claim_type=claim_data.get("claim_type"),
-            state=claim_data.get("state")
+            claim_type=c_type,
+            state=c_state,
+            min_amount=min_amt_filter,
+            max_amount=max_amt_filter
         )
+        # Fallback if filtered bracket returned fewer than 2 claims
+        if len(similar_claims) < 2 and (min_amt_filter or max_amt_filter):
+            similar_claims = hybrid_retriever.search(
+                query=query,
+                top_k=top_k_similar,
+                claim_type=c_type,
+                state=c_state
+            )
 
         # 3. Machine Learning predictions
         ml_results = claims_ml_service.predict(claim_data)

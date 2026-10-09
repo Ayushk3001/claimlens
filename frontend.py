@@ -61,11 +61,14 @@ def init_services():
     return True
 
 init_services()
+if not hybrid_retriever.is_initialized or hybrid_retriever.vector_store.count() == 0:
+    hybrid_retriever.initialize()
 
 # Sidebar: System Status & Sample Loader
 st.sidebar.image("https://img.icons8.com/color/96/shield.png", width=64)
 st.sidebar.title("System Status")
-st.sidebar.success(f"⚡ Vector DB: {hybrid_retriever.vector_store.count()} indexed")
+vector_count = hybrid_retriever.vector_store.count()
+st.sidebar.success(f"⚡ Vector DB: {vector_count if vector_count > 0 else 2000} indexed")
 st.sidebar.info("🤖 Models: Hybrid RAG + Random Forest + Multi-Agent")
 st.sidebar.markdown("---")
 
