@@ -43,7 +43,7 @@ To build an AI-assisted claims retrieval, prediction, and multi-agent workflow s
 | **Programming Language** | Python 3.11 | Core runtime environment |
 | **LLM Used** | OpenAI `gpt-5-nano` via `https://aicredits.in/v1` | Multi-agent reasoning, synthesis, and LLM-as-Judge |
 | **Embedding Model** | OpenAI `text-embedding-3-small` | 1536-dimensional dense claim vector embeddings (with deterministic fallback) |
-| **Vector Database** | In-Memory Vector Store | NumPy normalized cosine similarity retrieval (sub-3ms matrix dot product, see empirical latency benchmark in `docs/latency_benchmark.json`) |
+| **Vector Database** | In-Memory Vector Store | NumPy normalized cosine similarity retrieval (2.45 ms median matrix search over 2,000 indexed records; see empirical benchmark in `docs/latency_benchmark.json`) |
 | **Keyword Search** | Rank-BM25 | BM25Okapi lexical token search |
 | **Machine Learning** | Scikit-Learn (Random Forest) | Regression (Amount, Days) & Calibrated Classification (Fraud) |
 | **Backend Microservice** | FastAPI, Uvicorn, Pydantic v2 | High-throughput async REST API with validation guardrails |
@@ -68,7 +68,7 @@ ProjectRepository/
 │   ├── agents/
 │   │   ├── __init__.py
 │   │   ├── classification_agent.py  # Triage and priority scoring agent
-│   │   └── multi_agent_workflow.py  # 3-Agent workflow + LLM-as-Judge
+│   │   └── multi_agent_workflow.py  # 4-Agent sequential workflow + LLM-as-Judge
 │   ├── rag/
 │   │   ├── __init__.py
 │   │   ├── embeddings.py            # OpenAI & dense embedding generator
@@ -92,14 +92,14 @@ ProjectRepository/
 ├── docs/
 │   ├── API_Documentation.pdf        # Complete REST API reference
 │   ├── Dataset_Details.pdf          # 13 Core fields & preprocessing specs
-│   └── Evaluation_Report.pdf        # DeepEval & LLM-as-Judge scores
+│   └── Evaluation_Report.pdf        # LLM-as-Judge & benchmark report
 ├── tests/
 │   ├── __init__.py
 │   ├── test_guardrails.py           # Input schema & security tests
 │   ├── test_rag.py                  # Vector & BM25 retrieval tests
 │   ├── test_ml.py                   # Machine learning model tests
 │   ├── test_api.py                  # FastAPI route tests
-│   └── run_evaluation.py            # DeepEval & benchmark test suite
+│   └── run_evaluation.py            # LLM-as-Judge benchmark evaluation suite
 ├── presentation/
 │   └── Project_Presentation.pptx    # 10-minute panel presentation deck
 ├── scripts/
@@ -120,7 +120,7 @@ ProjectRepository/
 - **Sampling Scope & Execution Pipeline:**
   - **Source Scale:** 100M synthetic claims across multiple partitioned Parquet files.
   - **Local Model Training Sample:** 10,000 records extracted from row group 0 of the primary Parquet partition.
-  - **In-Memory Semantic Vector Store:** 1,500 records indexed at startup into an in-memory normalized NumPy cosine matrix for sub-2ms dot-product calculations (`np.dot(matrix, query_vec)`), with ~350ms end-to-end response time when including external API embedding network roundtrips.
+  - **In-Memory Semantic Vector Store:** 2,000 records indexed at startup into an in-memory normalized NumPy cosine matrix for fast matrix dot-product calculations (~2.45 ms median isolated vector search), with ~301.86 ms median end-to-end response time when including live external OpenAI embedding network roundtrips.
 - **Dual-Probability Underwriting Policy:**
   - **Calibrated Risk (Platt Scaling):** Reflects true statistical population likelihood (8.5% industry baseline). A calibrated risk $< 8.5\%$ with clean loss history ($0$ prior claims) and routine loss ($\le \$5,000$) qualifies for fast-track `AUTO_APPROVE`.
   - **Raw Model Probability:** Uncalibrated Random Forest tree split ratio. Serves as a secondary risk indicator; raw score $\ge 45.0\%$ triggers mandatory `SIU_REFERRAL`.
@@ -208,30 +208,31 @@ streamlit run frontend.py
 ```bash
 pytest -v
 ```
-*(All 23 comprehensive unit, guardrail, RAG metadata filtering, and API tests pass in under 20 seconds)*
+*(All 32 comprehensive unit, guardrail, RAG metadata filtering, evaluation harness, and API tests pass in under 35 seconds)*
 
-### Run DeepEval-Aligned LLM-as-Judge Benchmark
+### Run LLM-as-Judge Evaluation Suite
 ```bash
 python -m tests.run_evaluation
 ```
 - **Test Scenarios Evaluated:**
-  - `TC-001` (Auto collision, clean history): **AUTO_APPROVE** (Decision aligned: True)
-  - `TC-002` (Business arson risk): **SIU_REFERRAL** (Decision aligned: True)
-  - `TC-003` (Home water loss >$10k): **MANUAL_ADJUSTER_REVIEW** (Decision aligned: True)
-- **Results:** 3/3 tests passed (100% alignment), Faithfulness 95.0%, Relevancy / Completeness 90.0%, Policy Compliance 95.0%, LLM Judge 9.3/10.0 (Grade: EXCELLENT A+). No static fallback scores.
+  - `TC-001` (Auto collision, clean history): **AUTO_APPROVE** (Decision aligned: True, Invariants verified)
+  - `TC-002` (Business arson risk): **SIU_REFERRAL** (Decision aligned: True, Disbursement withheld: $0.00)
+  - `TC-003` (Home water loss >$10k): **MANUAL_ADJUSTER_REVIEW** (Decision aligned: True, Net ceiling verified: $14,000.00)
+- **Results:** 3/3 tests passed (100% alignment), Judge Faithfulness 95.0%, Judge Completeness 90.0%, Judge Policy Compliance 95.0%, Judge Overall Quality 9.3/10.0 (Grade: EXCELLENT A+). Strict numeric validation with no silent fallback scores.
 
 ### Run Empirical Latency Benchmark Suite
 ```bash
 python tests/benchmark_latency.py
 ```
-Empirical measurement results on 200 iterations over 2,000 active indexed vectors (saved to `docs/latency_benchmark.json`):
+Empirical measurement results over 2,000 active indexed vectors with 25 warm-up iterations (saved to `docs/latency_benchmark.json`):
 
 | Component | Min | Median | Mean | P95 | Max |
 | :--- | :---: | :---: | :---: | :---: | :---: |
-| **NumPy Vector Cosine Search** | 2.29 ms | 2.94 ms | 3.72 ms | 6.30 ms | 40.26 ms |
-| **BM25Okapi Keyword Search** | 7.68 ms | 10.34 ms | 10.46 ms | 12.98 ms | 17.24 ms |
-| **Internal Hybrid RRF Fusion** | 10.25 ms | 13.51 ms | 14.19 ms | 20.17 ms | 32.56 ms |
-| **End-to-End Hybrid Search (Live API)** | 263.81 ms | 272.27 ms | 291.86 ms | 368.03 ms | 568.98 ms |
+| **NumPy Vector Cosine Search (isolated)** | 1.94 ms | 2.45 ms | 3.01 ms | 4.90 ms | 20.47 ms |
+| **Local Hash Fallback Embedding (CPU)** | 0.08 ms | 0.12 ms | 0.14 ms | 0.22 ms | 1.09 ms |
+| **BM25Okapi Keyword Search** | 8.87 ms | 10.91 ms | 11.23 ms | 13.91 ms | 24.23 ms |
+| **Internal Hybrid RRF Fusion** | 11.16 ms | 13.89 ms | 14.54 ms | 18.25 ms | 33.15 ms |
+| **End-to-End Hybrid Search (Live API)** | 253.94 ms | 301.86 ms | 330.40 ms | 533.84 ms | 891.31 ms |
 
 ### Dual-Probability Underwriting Policy
 ClaimLens differentiates between the **raw Random Forest probability** (uncalibrated leaf proportion) and the **calibrated posterior risk** (via 5-fold `CalibratedClassifierCV` sigmoid calibration adjusted to the 8.5% industry fraud prevalence):
@@ -328,7 +329,7 @@ curl -X POST http://127.0.0.1:8000/claims/hybrid-search \
 - [x] **Presentation deck included** (`presentation/Project_Presentation.pptx`)
 - [x] **APIs are working** (All endpoints tested and verified)
 - [x] **Sample data included** (`data/sample_data/claims_sample.parquet` and `.csv`)
-- [x] **Evaluation reports included** (`docs/Evaluation_Report.pdf` with DeepEval metrics)
+- [x] **Evaluation reports included** (`docs/Evaluation_Report.pdf` with LLM-as-Judge benchmark metrics)
 - [x] **All deliverables follow naming conventions**
 - [x] **Local deployment instructions are included**
 - [x] **No secrets or API keys committed**

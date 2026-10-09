@@ -5,6 +5,7 @@ import json
 import platform
 from pathlib import Path
 from datetime import datetime, timezone
+from typing import List, Dict, Any
 import numpy as np
 
 # Ensure project root is in sys.path
@@ -17,20 +18,45 @@ from src.rag.keyword_search import keyword_search_engine
 from src.rag.hybrid_retriever import hybrid_retriever
 from src.rag.embeddings import embedding_service
 
-def run_latency_benchmarks(num_runs: int = 200) -> dict:
-    # Ensure RAG engines are initialized
+def compute_stats(arr: List[float]) -> Dict[str, float]:
+    """Calculate standard summary latency statistics in milliseconds."""
+    return {
+        "min_ms": round(float(np.min(arr)), 3),
+        "median_ms": round(float(np.median(arr)), 3),
+        "mean_ms": round(float(np.mean(arr)), 3),
+        "p95_ms": round(float(np.percentile(arr, 95)), 3),
+        "p99_ms": round(float(np.percentile(arr, 99)), 3),
+        "max_ms": round(float(np.max(arr)), 3)
+    }
+
+def run_latency_benchmarks(
+    matrix_runs: int = 200,
+    warmup_runs: int = 25,
+    api_e2e_runs: int = 15
+) -> Dict[str, Any]:
+    """Run comprehensive, empirical latency benchmarks across all retrieval subsystems.
+    
+    Strictly separates:
+    1. Isolated in-memory vector matrix search (search_by_vector) without network overhead
+    2. Local fallback pseudo-embedding generation (hash-based)
+    3. BM25Okapi lexical retrieval
+    4. Internal Hybrid RRF Fusion ranking
+    5. End-to-End Hybrid Retrieval (including live/fallback embedding service)
+    """
     if not hybrid_retriever.is_initialized:
         print("Initializing ClaimLens Hybrid RAG engines...")
-        hybrid_retriever.initialize()
+        hybrid_retriever.initialize(max_records=2000)
 
-    dim = claim_vector_store.embedding_matrix.shape[1] if claim_vector_store.embedding_matrix is not None else 1536
-    n_records = len(claim_vector_store.ids)
+    dim = claim_vector_store.dimension
+    n_records = claim_vector_store.count()
+    if n_records == 0:
+        raise RuntimeError("Vector store has zero indexed records. Benchmark cannot proceed.")
 
-    print("=" * 70)
+    print("=" * 75)
     print("CLAIMLENS EMPIRICAL LATENCY BENCHMARK SUITE")
-    print(f"Sample Size: {num_runs} iterations | Active Indexed Vectors: {n_records}")
-    print(f"Vector Dimensions: {dim} | Environment: {platform.system()} ({platform.machine()})")
-    print("=" * 70)
+    print(f"Matrix Iterations: {matrix_runs} (Warm-up: {warmup_runs}) | Indexed Vectors: {n_records}")
+    print(f"Embedding Dimension: {dim} | Environment: {platform.system()} ({platform.machine()})")
+    print("=" * 75)
 
     test_queries = [
         "Rear bumper collision in parking lot minor dent paint scrape",
@@ -39,38 +65,72 @@ def run_latency_benchmarks(num_runs: int = 200) -> dict:
         "Hail storm vehicle body damage windshield shattered",
         "Kitchen grease fire cabinet structural damage smoke remediation"
     ]
-    
-    # 1. Exact Vector Matrix Cosine Similarity Latency
-    # Measures raw in-memory matrix multiplication (N, D) @ (D,) + top-k extraction
-    vector_latencies_ms = []
-    rng = np.random.RandomState(42)
-    sample_query_vecs = [
-        (rng.randn(dim) / np.linalg.norm(rng.randn(dim))).tolist()
-        for _ in range(num_runs)
-    ]
 
-    for qvec in sample_query_vecs:
+    # Pre-generate valid, normalized 1536-dimensional query vectors for isolated matrix testing
+    rng = np.random.RandomState(42)
+    sample_query_vecs = []
+    for _ in range(matrix_runs + warmup_runs):
+        raw = rng.randn(dim).astype(np.float32)
+        norm = np.linalg.norm(raw)
+        sample_query_vecs.append((raw / norm).tolist())
+
+    # --------------------------------------------------------------------------
+    # 1. Isolated Vector Matrix Cosine Search (search_by_vector)
+    # Measures purely the internal (N, D) @ (D,) matrix dot product & top-k ranking
+    # --------------------------------------------------------------------------
+    print("\n[1/5] Benchmarking isolated vector matrix cosine similarity search...")
+    # Warm-up phase
+    for i in range(warmup_runs):
+        _ = claim_vector_store.search_by_vector(sample_query_vecs[i], top_k=5)
+
+    vector_latencies_ms = []
+    for i in range(warmup_runs, warmup_runs + matrix_runs):
+        qvec = sample_query_vecs[i]
         t0 = time.perf_counter()
-        _ = claim_vector_store.search(qvec, top_k=5)
+        _ = claim_vector_store.search_by_vector(qvec, top_k=5)
         t1 = time.perf_counter()
         vector_latencies_ms.append((t1 - t0) * 1000.0)
 
-    # 2. BM25Okapi Keyword Search Latency
+    # --------------------------------------------------------------------------
+    # 2. Local Fallback Embedding Generation Latency (Offline Hash-Based)
+    # --------------------------------------------------------------------------
+    print("[2/5] Benchmarking local hash-based fallback embedding generation...")
+    for i in range(warmup_runs):
+        _ = embedding_service._fallback_embedding(test_queries[i % len(test_queries)])
+
+    fallback_latencies_ms = []
+    for i in range(matrix_runs):
+        qtext = test_queries[i % len(test_queries)]
+        t0 = time.perf_counter()
+        _ = embedding_service._fallback_embedding(qtext)
+        t1 = time.perf_counter()
+        fallback_latencies_ms.append((t1 - t0) * 1000.0)
+
+    # --------------------------------------------------------------------------
+    # 3. BM25Okapi Keyword Search Latency
+    # --------------------------------------------------------------------------
+    print("[3/5] Benchmarking BM25Okapi keyword search...")
+    for i in range(warmup_runs):
+        _ = keyword_search_engine.search(test_queries[i % len(test_queries)], top_k=5)
+
     bm25_latencies_ms = []
-    for i in range(num_runs):
+    for i in range(matrix_runs):
         qtext = test_queries[i % len(test_queries)]
         t0 = time.perf_counter()
         _ = keyword_search_engine.search(qtext, top_k=5)
         t1 = time.perf_counter()
         bm25_latencies_ms.append((t1 - t0) * 1000.0)
 
-    # 3. Hybrid RRF Fusion Latency (Pre-computed query vector, internal algorithm isolation)
+    # --------------------------------------------------------------------------
+    # 4. Internal Hybrid RRF Fusion Latency (Precomputed Vector + BM25, no network)
+    # --------------------------------------------------------------------------
+    print("[4/5] Benchmarking internal hybrid RRF score fusion...")
     fusion_latencies_ms = []
-    for i in range(num_runs):
+    for i in range(matrix_runs):
         qtext = test_queries[i % len(test_queries)]
-        qvec = sample_query_vecs[i]
+        qvec = sample_query_vecs[i + warmup_runs]
         t0 = time.perf_counter()
-        v_res = claim_vector_store.search(qvec, top_k=10)
+        v_res = claim_vector_store.search_by_vector(qvec, top_k=10)
         k_res = keyword_search_engine.search(qtext, top_k=10)
         rrf_scores = {}
         for rk, item in enumerate(v_res):
@@ -83,83 +143,96 @@ def run_latency_benchmarks(num_runs: int = 200) -> dict:
         t1 = time.perf_counter()
         fusion_latencies_ms.append((t1 - t0) * 1000.0)
 
-    # 4. End-to-End Hybrid Search Latency (including embedding retrieval)
+    # --------------------------------------------------------------------------
+    # 5. End-to-End Hybrid Search Latency (hybrid_retriever.search via live/mock)
+    # --------------------------------------------------------------------------
+    print(f"[5/5] Benchmarking end-to-end hybrid retrieval ({api_e2e_runs} iterations)...")
+    # 2 warm-up iterations
+    for i in range(min(2, api_e2e_runs)):
+        _ = hybrid_retriever.search(query=test_queries[i % len(test_queries)], top_k=5)
+
     e2e_latencies_ms = []
-    for i in range(15):
+    for i in range(api_e2e_runs):
         qtext = test_queries[i % len(test_queries)]
         t0 = time.perf_counter()
         _ = hybrid_retriever.search(query=qtext, top_k=5)
         t1 = time.perf_counter()
         e2e_latencies_ms.append((t1 - t0) * 1000.0)
 
-    def compute_stats(arr):
-        return {
-            "min_ms": round(float(np.min(arr)), 3),
-            "median_ms": round(float(np.median(arr)), 3),
-            "mean_ms": round(float(np.mean(arr)), 3),
-            "p95_ms": round(float(np.percentile(arr, 95)), 3),
-            "p99_ms": round(float(np.percentile(arr, 99)), 3),
-            "max_ms": round(float(np.max(arr)), 3)
-        }
+    is_live_api = bool(embedding_service.client is not None)
 
     results = {
         "benchmark_timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "methodology": "Empirical multi-iteration latency measurement with warm-up exclusion and isolated matrix math",
         "environment": {
             "os": platform.platform(),
             "python_version": platform.python_version(),
             "cpu_architecture": platform.machine(),
             "processor": platform.processor(),
             "active_indexed_vectors": n_records,
-            "embedding_dimension": dim
+            "embedding_dimension": dim,
+            "live_embedding_api_active": is_live_api
         },
         "benchmarks": {
             "vector_matrix_cosine_search": {
-                "description": "In-memory normalized NumPy cosine matrix dot product ((N, D) @ (D,)) + top-k partition",
-                "iterations": num_runs,
+                "operation": "In-memory normalized NumPy cosine matrix dot product ((N, D) @ (D,)) + top-k partition via search_by_vector",
+                "warmup_runs": warmup_runs,
+                "measured_iterations": matrix_runs,
                 "stats": compute_stats(vector_latencies_ms)
             },
+            "local_fallback_embedding_generation": {
+                "operation": "Deterministic SHA256/MD5 text hash pseudo-embedding generation (local CPU)",
+                "warmup_runs": warmup_runs,
+                "measured_iterations": matrix_runs,
+                "stats": compute_stats(fallback_latencies_ms)
+            },
             "bm25_keyword_search": {
-                "description": "Rank-BM25 tokenization and scoring across claim narrative corpus",
-                "iterations": num_runs,
+                "operation": "Rank-BM25 tokenization and scoring across claim narrative corpus",
+                "warmup_runs": warmup_runs,
+                "measured_iterations": matrix_runs,
                 "stats": compute_stats(bm25_latencies_ms)
             },
             "internal_hybrid_fusion": {
-                "description": "Vector dot product + BM25 score merge via Reciprocal Rank Fusion (excluding network)",
-                "iterations": num_runs,
+                "operation": "Vector search_by_vector + BM25 score merge via Reciprocal Rank Fusion (excluding network)",
+                "warmup_runs": warmup_runs,
+                "measured_iterations": matrix_runs,
                 "stats": compute_stats(fusion_latencies_ms)
             },
             "end_to_end_hybrid_retrieval": {
-                "description": "Full pipeline: Query string -> Embedding Service -> Vector Search + BM25 -> RRF top-5",
-                "iterations": len(e2e_latencies_ms),
+                "operation": "Full pipeline: Natural language query string -> Embedding generation -> Vector Search + BM25 -> RRF top-5",
+                "warmup_runs": 2,
+                "measured_iterations": api_e2e_runs,
                 "stats": compute_stats(e2e_latencies_ms)
             }
         }
     }
 
-    # Print clean formatted summary
     v_stat = results["benchmarks"]["vector_matrix_cosine_search"]["stats"]
+    f_stat = results["benchmarks"]["local_fallback_embedding_generation"]["stats"]
     b_stat = results["benchmarks"]["bm25_keyword_search"]["stats"]
     h_stat = results["benchmarks"]["internal_hybrid_fusion"]["stats"]
     e_stat = results["benchmarks"]["end_to_end_hybrid_retrieval"]["stats"]
 
-    print("\nBENCHMARK RESULTS (LATENCY IN MILLISECONDS):")
-    print(f"{'Component':<32} | {'Min':>7} | {'Median':>7} | {'Mean':>7} | {'P95':>7} | {'Max':>7}")
-    print("-" * 75)
-    print(f"{'NumPy Vector Cosine Search':<32} | {v_stat['min_ms']:>6.2f}ms | {v_stat['median_ms']:>6.2f}ms | {v_stat['mean_ms']:>6.2f}ms | {v_stat['p95_ms']:>6.2f}ms | {v_stat['max_ms']:>6.2f}ms")
-    print(f"{'BM25Okapi Keyword Search':<32} | {b_stat['min_ms']:>6.2f}ms | {b_stat['median_ms']:>6.2f}ms | {b_stat['mean_ms']:>6.2f}ms | {b_stat['p95_ms']:>6.2f}ms | {b_stat['max_ms']:>6.2f}ms")
-    print(f"{'Internal Hybrid RRF Fusion':<32} | {h_stat['min_ms']:>6.2f}ms | {h_stat['median_ms']:>6.2f}ms | {h_stat['mean_ms']:>6.2f}ms | {h_stat['p95_ms']:>6.2f}ms | {h_stat['max_ms']:>6.2f}ms")
-    print(f"{'End-to-End Hybrid Search (API)':<32} | {e_stat['min_ms']:>6.2f}ms | {e_stat['median_ms']:>6.2f}ms | {e_stat['mean_ms']:>6.2f}ms | {e_stat['p95_ms']:>6.2f}ms | {e_stat['max_ms']:>6.2f}ms")
-    print("=" * 75)
+    print("\n" + "=" * 78)
+    print("EMPIRICAL LATENCY BENCHMARK RESULTS (IN MILLISECONDS):")
+    print(f"{'Component / Subsystem':<35} | {'Min':>7} | {'Median':>7} | {'Mean':>7} | {'P95':>7} | {'Max':>7}")
+    print("-" * 78)
+    print(f"{'NumPy Cosine Matrix Search':<35} | {v_stat['min_ms']:>6.2f}ms | {v_stat['median_ms']:>6.2f}ms | {v_stat['mean_ms']:>6.2f}ms | {v_stat['p95_ms']:>6.2f}ms | {v_stat['max_ms']:>6.2f}ms")
+    print(f"{'Local Fallback Embedding (CPU)':<35} | {f_stat['min_ms']:>6.2f}ms | {f_stat['median_ms']:>6.2f}ms | {f_stat['mean_ms']:>6.2f}ms | {f_stat['p95_ms']:>6.2f}ms | {f_stat['max_ms']:>6.2f}ms")
+    print(f"{'BM25Okapi Keyword Search':<35} | {b_stat['min_ms']:>6.2f}ms | {b_stat['median_ms']:>6.2f}ms | {b_stat['mean_ms']:>6.2f}ms | {b_stat['p95_ms']:>6.2f}ms | {b_stat['max_ms']:>6.2f}ms")
+    print(f"{'Internal Hybrid RRF Fusion':<35} | {h_stat['min_ms']:>6.2f}ms | {h_stat['median_ms']:>6.2f}ms | {h_stat['mean_ms']:>6.2f}ms | {h_stat['p95_ms']:>6.2f}ms | {h_stat['max_ms']:>6.2f}ms")
+    print(f"{'End-to-End Hybrid Search':<35} | {e_stat['min_ms']:>6.2f}ms | {e_stat['median_ms']:>6.2f}ms | {e_stat['mean_ms']:>6.2f}ms | {e_stat['p95_ms']:>6.2f}ms | {e_stat['max_ms']:>6.2f}ms")
+    print("=" * 78)
     print(f"System: {platform.platform()} | Python: {platform.python_version()} | Indexed Vectors: {n_records}")
-    print("=" * 75)
+    print(f"Embedding Provider: {'Live External API (OpenAI)' if is_live_api else 'Deterministic Local Fallback'}")
+    print("=" * 78)
 
-    # Save to docs/latency_benchmark.json
     docs_dir = PROJECT_ROOT / "docs"
     docs_dir.mkdir(parents=True, exist_ok=True)
     out_file = docs_dir / "latency_benchmark.json"
     with open(out_file, "w", encoding="utf-8") as f:
         json.dump(results, f, indent=2)
-    print(f"\nSaved empirical benchmark report to: {out_file}")
+    print(f"\nEmpirical report saved to: {out_file}")
 
     return results
 

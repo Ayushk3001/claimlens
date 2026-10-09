@@ -1,16 +1,20 @@
 {
-  "evaluation_timestamp": "2026-10-09T07:31:01Z",
+  "evaluation_timestamp": "2026-10-09T08:06:55Z",
   "evaluation_framework": "LLM-as-Judge & Deterministic Invariant Auditing",
-  "methodology_notes": "Scores are derived from multi-agent LLM Judge evaluations (factual consistency, completeness, and financial policy adherence) combined with deterministic underwriting invariant verification. No static fallback scores are utilized.",
+  "methodology_notes": "Scores are derived directly from the multi-agent LLM Judge evaluation dimensions (factual consistency, completeness, and underwriting policy compliance) combined with deterministic financial invariant validation. Metric values are validated for finite range [0.0, 10.0]. No static fallback scores or simulated DeepEval proxies are utilized.",
   "benchmark_tests_count": 3,
   "tests_passed": 3,
   "pass_rate_percent": 100.0,
   "metrics_summary": {
+    "judge_faithfulness_score": 0.95,
+    "judge_completeness_score": 0.9,
+    "judge_policy_compliance_score": 0.95,
+    "judge_overall_quality_score": 0.93,
+    "overall_system_grade": "EXCELLENT (A+)",
     "faithfulness": 0.95,
     "answer_relevancy": 0.9,
     "underwriting_policy_compliance": 0.95,
     "llm_as_judge_quality_score": 0.93,
-    "overall_system_grade": "EXCELLENT (A+)",
     "deepeval_faithfulness": 0.95,
     "deepeval_answer_relevancy": 0.9
   },
@@ -26,12 +30,13 @@
       "constraints_passed": true,
       "constraint_notes": [],
       "loss_amount_verified": true,
+      "settlement_ceiling_verified": true,
       "judge_verdict": "PASS",
       "judge_overall_score": 9.3,
       "test_passed": true,
-      "faithfulness": 0.95,
-      "relevancy": 0.9,
-      "compliance": 0.95
+      "judge_faithfulness_score": 0.95,
+      "judge_completeness_score": 0.9,
+      "judge_policy_compliance_score": 0.95
     },
     {
       "test_id": "TC-002",
@@ -44,12 +49,13 @@
       "constraints_passed": true,
       "constraint_notes": [],
       "loss_amount_verified": true,
+      "settlement_ceiling_verified": true,
       "judge_verdict": "PASS",
       "judge_overall_score": 9.3,
       "test_passed": true,
-      "faithfulness": 0.95,
-      "relevancy": 0.9,
-      "compliance": 0.95
+      "judge_faithfulness_score": 0.95,
+      "judge_completeness_score": 0.9,
+      "judge_policy_compliance_score": 0.95
     },
     {
       "test_id": "TC-003",
@@ -62,12 +68,13 @@
       "constraints_passed": true,
       "constraint_notes": [],
       "loss_amount_verified": true,
+      "settlement_ceiling_verified": true,
       "judge_verdict": "PASS",
       "judge_overall_score": 9.3,
       "test_passed": true,
-      "faithfulness": 0.95,
-      "relevancy": 0.9,
-      "compliance": 0.95
+      "judge_faithfulness_score": 0.95,
+      "judge_completeness_score": 0.9,
+      "judge_policy_compliance_score": 0.95
     }
   ]
 }

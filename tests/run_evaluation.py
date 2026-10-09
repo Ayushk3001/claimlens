@@ -1,9 +1,11 @@
 import os
 import sys
 import json
+import math
 from pathlib import Path
 from datetime import datetime, timezone
 from typing import List, Dict, Any
+import numpy as np
 
 # Ensure project root is in sys.path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -107,11 +109,22 @@ def run_evaluation_suite() -> Dict[str, Any]:
         raw_fraud = float(risk.get("fraud_probability_percent", 0.0))
         calibrated_fraud = float(ml.get("calibrated_fraud_probability_percent", raw_fraud))
 
+        claimed_amt = float(inp.get("claim_amount", 0.0))
+        deductible_amt = float(inp.get("deductible", 0.0))
+
         # 3. Assert benchmark constraints independently (strict validation of all declared conditions)
         decision_aligned = (rec["decision"] == tc["expected_action"])
 
         constraints_passed = True
         constraint_notes = []
+
+        # Invariant Verification for ALL claims: Net settlement ceiling must equal max(0, Claim Amount - Deductible)
+        expected_ceiling = max(0.0, round(claimed_amt - deductible_amt, 2))
+        actual_ceiling = float(rec.get("net_settlement_ceiling", -1.0))
+        if abs(actual_ceiling - expected_ceiling) > 0.01:
+            constraints_passed = False
+            constraint_notes.append(f"Net settlement ceiling (${actual_ceiling:,.2f}) violated invariant (expected ${expected_ceiling:,.2f})")
+
         if "max_calibrated_fraud_prob" in tc:
             if calibrated_fraud > tc["max_calibrated_fraud_prob"]:
                 constraints_passed = False
@@ -125,35 +138,37 @@ def run_evaluation_suite() -> Dict[str, Any]:
                 constraints_passed = False
                 constraint_notes.append(f"Raw prob {raw_fraud}% fell below min {tc['min_raw_fraud_prob']}%")
         if "min_loss_amount" in tc:
-            claimed_amt = float(inp.get("claim_amount", 0.0))
             if claimed_amt < tc["min_loss_amount"]:
                 constraints_passed = False
                 constraint_notes.append(f"Claim amount ${claimed_amt:,.2f} fell below required min_loss_amount ${tc['min_loss_amount']:,.2f}")
-            # Ensure recommendation recognizes this high-value loss and establishes proper net ceiling
-            expected_net_ceiling = max(0.0, round(claimed_amt - float(inp.get("deductible", 0.0)), 2))
-            if abs(rec.get("net_settlement_ceiling", 0.0) - expected_net_ceiling) > 0.01:
-                constraints_passed = False
-                constraint_notes.append(f"Net settlement ceiling (${rec.get('net_settlement_ceiling'):,.2f}) did not match expected (${expected_net_ceiling:,.2f})")
-
-        judge_passed = (judge.get("verdict") == "PASS")
-        test_passed = bool(decision_aligned and constraints_passed and judge_passed)
 
         # 4. Measured metric calculations from multi-agent judge scores (NO silent fallbacks allowed)
         metric_scores = judge.get("metric_scores")
-        if not metric_scores:
-            raise ValueError(f"Judge output for {tc['test_id']} is missing 'metric_scores'. Fallback scores are disallowed.")
+        if not isinstance(metric_scores, dict):
+            raise ValueError(f"Judge output for {tc['test_id']} missing valid 'metric_scores' dict. Fallback scores are disallowed.")
 
         for req_metric in ("factual_consistency", "completeness", "policy_compliance"):
             if req_metric not in metric_scores:
-                raise ValueError(f"Judge output for {tc['test_id']} is missing required metric '{req_metric}'.")
+                raise ValueError(f"Judge output for {tc['test_id']} missing required metric '{req_metric}'.")
+            m_val = metric_scores[req_metric]
+            if not isinstance(m_val, (int, float)) or isinstance(m_val, bool) or not np.isfinite(m_val):
+                raise ValueError(f"Metric '{req_metric}' for {tc['test_id']} must be finite numeric, got {m_val!r}")
+            if not (0.0 <= m_val <= 10.0):
+                raise ValueError(f"Metric '{req_metric}' for {tc['test_id']} out of bounds [0.0, 10.0]: {m_val}")
 
-        if "overall_quality_score" not in judge:
-            raise ValueError(f"Judge output for {tc['test_id']} is missing 'overall_quality_score'.")
+        ov_val = judge.get("overall_quality_score")
+        if not isinstance(ov_val, (int, float)) or isinstance(ov_val, bool) or not np.isfinite(ov_val):
+            raise ValueError(f"Judge overall_quality_score for {tc['test_id']} must be finite numeric, got {ov_val!r}")
+        if not (0.0 <= ov_val <= 10.0):
+            raise ValueError(f"Judge overall_quality_score for {tc['test_id']} out of bounds [0.0, 10.0]: {ov_val}")
+
+        judge_passed = (judge.get("verdict") == "PASS" and ov_val >= 8.0)
+        test_passed = bool(decision_aligned and constraints_passed and judge_passed)
 
         faithfulness = round(metric_scores["factual_consistency"] / 10.0, 4)
         relevancy = round(metric_scores["completeness"] / 10.0, 4)
         compliance = round(metric_scores["policy_compliance"] / 10.0, 4)
-        overall_quality = round(judge["overall_quality_score"] / 10.0, 4)
+        overall_quality = round(ov_val / 10.0, 4)
 
         faithfulness_scores.append(faithfulness)
         relevancy_scores.append(relevancy)
@@ -170,17 +185,18 @@ def run_evaluation_suite() -> Dict[str, Any]:
             "calibrated_fraud_probability_percent": calibrated_fraud,
             "constraints_passed": constraints_passed,
             "constraint_notes": constraint_notes,
-            "loss_amount_verified": (float(inp.get("claim_amount", 0.0)) >= tc.get("min_loss_amount", 0.0)),
+            "loss_amount_verified": (claimed_amt >= tc.get("min_loss_amount", 0.0)),
+            "settlement_ceiling_verified": (abs(actual_ceiling - expected_ceiling) <= 0.01),
             "judge_verdict": judge["verdict"],
-            "judge_overall_score": judge["overall_quality_score"],
+            "judge_overall_score": ov_val,
             "test_passed": test_passed,
-            "faithfulness": faithfulness,
-            "relevancy": relevancy,
-            "compliance": compliance
+            "judge_faithfulness_score": faithfulness,
+            "judge_completeness_score": relevancy,
+            "judge_policy_compliance_score": compliance
         })
         print(f" -> Decision: {rec['decision']} (Expected: {tc['expected_action']}) | Match: {decision_aligned}")
         print(f" -> Raw Fraud: {raw_fraud}% | Calibrated Fraud: {calibrated_fraud}% (Valid Constraints: {constraints_passed})")
-        print(f" -> Judge Verdict: {judge['verdict']} (Score: {judge['overall_quality_score']}/10) | Passed: {test_passed}")
+        print(f" -> Judge Verdict: {judge['verdict']} (Score: {ov_val}/10) | Passed: {test_passed}")
 
     avg_faithfulness = round(sum(faithfulness_scores) / len(faithfulness_scores), 4)
     avg_relevancy = round(sum(relevancy_scores) / len(relevancy_scores), 4)
@@ -192,7 +208,7 @@ def run_evaluation_suite() -> Dict[str, Any]:
     pass_rate = passed_tests / total_tests if total_tests > 0 else 0.0
     mean_metric = (avg_faithfulness + avg_relevancy + avg_compliance + avg_judge) / 4.0
 
-    # Algorithmic grade derivation based on objective criteria
+    # Algorithmic grade derivation based on documented objective criteria
     if pass_rate == 1.0 and mean_metric >= 0.90:
         overall_grade = "EXCELLENT (A+)"
     elif pass_rate >= 0.75 and mean_metric >= 0.80:
@@ -207,16 +223,26 @@ def run_evaluation_suite() -> Dict[str, Any]:
     summary = {
         "evaluation_timestamp": dynamic_timestamp,
         "evaluation_framework": "LLM-as-Judge & Deterministic Invariant Auditing",
-        "methodology_notes": "Scores are derived from multi-agent LLM Judge evaluations (factual consistency, completeness, and financial policy adherence) combined with deterministic underwriting invariant verification. No static fallback scores are utilized.",
+        "methodology_notes": (
+            "Scores are derived directly from the multi-agent LLM Judge evaluation dimensions "
+            "(factual consistency, completeness, and underwriting policy compliance) combined with "
+            "deterministic financial invariant validation. Metric values are validated for finite range [0.0, 10.0]. "
+            "No static fallback scores or simulated DeepEval proxies are utilized."
+        ),
         "benchmark_tests_count": total_tests,
         "tests_passed": passed_tests,
         "pass_rate_percent": round(pass_rate * 100, 1),
         "metrics_summary": {
+            "judge_faithfulness_score": avg_faithfulness,
+            "judge_completeness_score": avg_relevancy,
+            "judge_policy_compliance_score": avg_compliance,
+            "judge_overall_quality_score": avg_judge,
+            "overall_system_grade": overall_grade,
+            # Backward-compatible aliases for report generators
             "faithfulness": avg_faithfulness,
             "answer_relevancy": avg_relevancy,
             "underwriting_policy_compliance": avg_compliance,
             "llm_as_judge_quality_score": avg_judge,
-            "overall_system_grade": overall_grade,
             "deepeval_faithfulness": avg_faithfulness,
             "deepeval_answer_relevancy": avg_relevancy
         },

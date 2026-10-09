@@ -86,3 +86,69 @@ def test_deterministic_fallback_embedding_behavior():
     dot_prod = float(np.dot(vec_a1, vec_b))
     assert dot_prod < 0.99, f"Different text inputs produced unexpectedly identical vectors (cosine sim: {dot_prod})"
 
+def test_vector_store_dimensionality_and_numeric_validation():
+    """Verify that search_by_vector strictly validates vector shape, finiteness, and dimensionality."""
+    import numpy as np
+    from src.rag.vector_store import claim_vector_store
+
+    # Test rejection of non-vector type
+    with pytest.raises(TypeError):
+        claim_vector_store.search_by_vector("invalid-string-vector")
+
+    # Test rejection of wrong dimension (e.g. 100 instead of 1536)
+    with pytest.raises(ValueError, match="dimension mismatch"):
+        claim_vector_store.search_by_vector([0.1] * 100)
+
+    # Test rejection of 2D array
+    with pytest.raises(ValueError, match="1-dimensional"):
+        claim_vector_store.search_by_vector(np.zeros((1, 1536)))
+
+    # Test rejection of NaN values
+    nan_vec = [0.0] * 1536
+    nan_vec[0] = float("nan")
+    with pytest.raises(ValueError, match="NaN or infinite"):
+        claim_vector_store.search_by_vector(nan_vec)
+
+    # Test rejection of zero-magnitude vector
+    zero_vec = [0.0] * 1536
+    with pytest.raises(ValueError, match="zero-magnitude"):
+        claim_vector_store.search_by_vector(zero_vec)
+
+    # Test search() rejects non-string query
+    with pytest.raises(TypeError, match="query must be a string"):
+        claim_vector_store.search([0.1] * 1536)
+
+def test_deterministic_vector_search_with_known_vector():
+    """Verify vector search returns exact known matches and scores using an isolated ClaimVectorStore."""
+    import numpy as np
+    from src.rag.vector_store import ClaimVectorStore
+
+    test_store = ClaimVectorStore()
+    dim = test_store.dimension
+
+    # Construct 3 orthogonal unit vectors in 1536 dimensions
+    v0 = np.zeros(dim, dtype=np.float32); v0[0] = 1.0
+    v1 = np.zeros(dim, dtype=np.float32); v1[1] = 1.0
+    v2 = np.zeros(dim, dtype=np.float32); v2[2] = 1.0
+
+    test_store.ids = ["ID-0", "ID-1", "ID-2"]
+    test_store.documents = ["Doc 0", "Doc 1", "Doc 2"]
+    test_store.metadatas = [
+        {"claim_id": "CLM-000", "claim_type": "Auto"},
+        {"claim_id": "CLM-001", "claim_type": "Home"},
+        {"claim_id": "CLM-002", "claim_type": "Auto"}
+    ]
+    test_store.embedding_matrix = np.vstack([v0, v1, v2])
+
+    # Search with v0: top candidate must be ID-0 with perfect similarity
+    results = test_store.search_by_vector(v0, top_k=2)
+    assert len(results) == 2
+    assert results[0]["claim_id"] == "CLM-000"
+    assert results[0]["vector_similarity"] == 1.0  # (1.0 + 1.0) / 2.0 = 1.0
+
+    # Search with metadata filter claim_type="Auto": should match CLM-000 and CLM-002, excluding CLM-001
+    filtered = test_store.search_by_vector(v1, top_k=3, where_filter={"claim_type": "Auto"})
+    assert all(r["claim_type"] == "Auto" for r in filtered)
+    assert not any(r["claim_id"] == "CLM-001" for r in filtered)
+
+

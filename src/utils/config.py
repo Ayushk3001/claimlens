@@ -27,15 +27,17 @@ class Settings(BaseSettings):
     PARQUET_FILE: Path = PROJECT_ROOT / "data" / "sample_data" / "claims_sample.parquet"
     CSV_FILE: Path = PROJECT_ROOT / "data" / "sample_data" / "claims_sample.csv"
     CHROMA_DIR: Path = PROJECT_ROOT / "data" / "chroma_db"
+    VECTOR_STORE_DIR: Path = PROJECT_ROOT / "data" / "vector_store"
     FEEDBACK_FILE: Path = PROJECT_ROOT / "data" / "feedback_store.json"
     MODELS_DIR: Path = PROJECT_ROOT / "data" / "models"
     
-    # Hugging Face Dataset
+    # Hugging Face Dataset & Vector Indexing Configuration
     HF_DATASET_ID: str = "ziadatalabs/FreeInsuranceClaims100M"
     HF_PARQUET_URL: str = (
         "https://huggingface.co/datasets/ziadatalabs/FreeInsuranceClaims100M/resolve/main/insurance_claims_100M.parquet"
     )
     SAMPLE_SIZE: int = 10000
+    INDEX_MAX_RECORDS: int = 2000
     
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
 

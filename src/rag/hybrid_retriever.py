@@ -4,6 +4,7 @@ import pandas as pd
 from src.rag.vector_store import claim_vector_store
 from src.rag.keyword_search import keyword_search_engine
 from src.utils.data_loader import load_claims_dataset
+from src.utils.config import settings
 
 class HybridRetriever:
     def __init__(self):
@@ -11,11 +12,12 @@ class HybridRetriever:
         self.keyword_search = keyword_search_engine
         self.is_initialized = False
 
-    def initialize(self, max_records: int = 2000):
+    def initialize(self, max_records: Optional[int] = None):
         """Pre-indexes data into both Vector Store and BM25 search engine."""
+        limit = max_records or settings.INDEX_MAX_RECORDS
         df = load_claims_dataset()
         self.keyword_search.index_dataframe(df)
-        self.vector_store.index_dataframe(df, max_records=max_records)
+        self.vector_store.index_dataframe(df, max_records=limit)
         self.is_initialized = True
 
     def search(

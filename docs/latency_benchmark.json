@@ -1,60 +1,79 @@
 {
-  "benchmark_timestamp": "2026-10-09T07:25:33Z",
+  "benchmark_timestamp": "2026-10-09T08:04:27Z",
+  "methodology": "Empirical multi-iteration latency measurement with warm-up exclusion and isolated matrix math",
   "environment": {
     "os": "Windows-10-10.0.26200-SP0",
     "python_version": "3.11.3",
     "cpu_architecture": "AMD64",
     "processor": "Intel64 Family 6 Model 154 Stepping 4, GenuineIntel",
     "active_indexed_vectors": 2000,
-    "embedding_dimension": 1536
+    "embedding_dimension": 1536,
+    "live_embedding_api_active": true
   },
   "benchmarks": {
     "vector_matrix_cosine_search": {
-      "description": "In-memory normalized NumPy cosine matrix dot product ((N, D) @ (D,)) + top-k partition",
-      "iterations": 200,
+      "operation": "In-memory normalized NumPy cosine matrix dot product ((N, D) @ (D,)) + top-k partition via search_by_vector",
+      "warmup_runs": 25,
+      "measured_iterations": 200,
       "stats": {
-        "min_ms": 2.295,
-        "median_ms": 2.937,
-        "mean_ms": 3.719,
-        "p95_ms": 6.304,
-        "p99_ms": 10.473,
-        "max_ms": 40.259
+        "min_ms": 2.281,
+        "median_ms": 2.45,
+        "mean_ms": 2.687,
+        "p95_ms": 3.721,
+        "p99_ms": 4.078,
+        "max_ms": 4.508
+      }
+    },
+    "local_fallback_embedding_generation": {
+      "operation": "Deterministic SHA256/MD5 text hash pseudo-embedding generation (local CPU)",
+      "warmup_runs": 25,
+      "measured_iterations": 200,
+      "stats": {
+        "min_ms": 0.118,
+        "median_ms": 0.123,
+        "mean_ms": 0.135,
+        "p95_ms": 0.203,
+        "p99_ms": 0.358,
+        "max_ms": 0.43
       }
     },
     "bm25_keyword_search": {
-      "description": "Rank-BM25 tokenization and scoring across claim narrative corpus",
-      "iterations": 200,
+      "operation": "Rank-BM25 tokenization and scoring across claim narrative corpus",
+      "warmup_runs": 25,
+      "measured_iterations": 200,
       "stats": {
-        "min_ms": 7.684,
-        "median_ms": 10.339,
-        "mean_ms": 10.463,
-        "p95_ms": 12.977,
-        "p99_ms": 14.447,
-        "max_ms": 17.238
+        "min_ms": 7.098,
+        "median_ms": 10.909,
+        "mean_ms": 10.74,
+        "p95_ms": 12.877,
+        "p99_ms": 13.308,
+        "max_ms": 13.52
       }
     },
     "internal_hybrid_fusion": {
-      "description": "Vector dot product + BM25 score merge via Reciprocal Rank Fusion (excluding network)",
-      "iterations": 200,
+      "operation": "Vector search_by_vector + BM25 score merge via Reciprocal Rank Fusion (excluding network)",
+      "warmup_runs": 25,
+      "measured_iterations": 200,
       "stats": {
-        "min_ms": 10.25,
-        "median_ms": 13.506,
-        "mean_ms": 14.194,
-        "p95_ms": 20.169,
-        "p99_ms": 26.958,
-        "max_ms": 32.559
+        "min_ms": 10.247,
+        "median_ms": 13.892,
+        "mean_ms": 13.75,
+        "p95_ms": 15.943,
+        "p99_ms": 16.209,
+        "max_ms": 16.933
       }
     },
     "end_to_end_hybrid_retrieval": {
-      "description": "Full pipeline: Query string -> Embedding Service -> Vector Search + BM25 -> RRF top-5",
-      "iterations": 15,
+      "operation": "Full pipeline: Natural language query string -> Embedding generation -> Vector Search + BM25 -> RRF top-5",
+      "warmup_runs": 2,
+      "measured_iterations": 15,
       "stats": {
-        "min_ms": 263.812,
-        "median_ms": 272.267,
-        "mean_ms": 291.856,
-        "p95_ms": 368.026,
-        "p99_ms": 528.792,
-        "max_ms": 568.983
+        "min_ms": 293.8,
+        "median_ms": 301.858,
+        "mean_ms": 311.933,
+        "p95_ms": 363.344,
+        "p99_ms": 387.507,
+        "max_ms": 393.548
       }
     }
   }

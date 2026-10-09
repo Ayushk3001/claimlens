@@ -16,6 +16,7 @@ class ClaimVectorStore:
         os.makedirs(self.persist_dir, exist_ok=True)
         self.collection_name = "insurance_claims_100m_sample"
         
+        self.dimension: int = 1536
         self.ids: List[str] = []
         self.documents: List[str] = []
         self.metadatas: List[Dict[str, Any]] = []
@@ -25,7 +26,7 @@ class ClaimVectorStore:
     def count(self) -> int:
         return len(self.ids)
 
-    def index_dataframe(self, df: pd.DataFrame, max_records: int = 1500, batch_size: int = 100):
+    def index_dataframe(self, df: pd.DataFrame, max_records: int = 2000, batch_size: int = 100):
         """Index a subset of dataframe records into vector store with normalized embeddings."""
         if len(self.ids) >= min(len(df), max_records):
             return
@@ -86,28 +87,41 @@ class ClaimVectorStore:
         self.documents.extend(new_docs)
         self.metadatas.extend(new_metas)
 
-    def search(
+    def search_by_vector(
         self,
-        query: Any,
+        query_vector: Any,
         top_k: int = 10,
         where_filter: Optional[Dict[str, Any]] = None
     ) -> List[Dict[str, Any]]:
-        """Perform semantic cosine similarity search with metadata filtering."""
+        """Perform exact cosine similarity search on the indexed matrix using a validated precomputed vector.
+
+        Validates:
+        - 1-dimensional array/list
+        - exact dimensionality match with self.dimension (1536)
+        - all values are finite (no NaN, Inf)
+        - non-zero L2 norm
+        """
         if self.count() == 0 or self.embedding_matrix is None:
             return []
 
-        # Generate or unpack normalized query vector
-        if isinstance(query, (list, np.ndarray)):
-            query_vec = np.array(query, dtype=np.float32)
-        else:
-            query_vec = np.array(embedding_service.get_embedding(str(query)), dtype=np.float32)
+        if not isinstance(query_vector, (list, np.ndarray)):
+            raise TypeError(f"query_vector must be a list or numpy array, got {type(query_vector).__name__}")
 
-        q_norm = np.linalg.norm(query_vec)
-        if q_norm > 0:
-            query_vec /= q_norm
+        vec = np.asarray(query_vector, dtype=np.float32)
+        if vec.ndim != 1:
+            raise ValueError(f"query_vector must be 1-dimensional, got shape {vec.shape}")
+        if vec.shape[0] != self.dimension:
+            raise ValueError(f"query_vector dimension mismatch: expected {self.dimension}, got {vec.shape[0]}")
+        if not np.all(np.isfinite(vec)):
+            raise ValueError("query_vector contains NaN or infinite values")
+
+        v_norm = float(np.linalg.norm(vec))
+        if v_norm <= 0.0:
+            raise ValueError("query_vector cannot be a zero-magnitude vector")
+        vec = vec / v_norm
 
         # Cosine similarity matrix multiplication: (N, D) @ (D,) -> (N,)
-        cosine_scores = np.dot(self.embedding_matrix, query_vec)
+        cosine_scores = np.dot(self.embedding_matrix, vec)
 
         # Apply where_filter and sort
         scored_candidates = []
@@ -138,5 +152,20 @@ class ClaimVectorStore:
 
         scored_candidates.sort(key=lambda x: x["vector_similarity"], reverse=True)
         return scored_candidates[:top_k]
+
+    def search(
+        self,
+        query: str,
+        top_k: int = 10,
+        where_filter: Optional[Dict[str, Any]] = None
+    ) -> List[Dict[str, Any]]:
+        """Perform semantic cosine similarity search for text queries with metadata filtering."""
+        if not isinstance(query, str):
+            raise TypeError(f"query must be a string, got {type(query).__name__}. Use search_by_vector() for precomputed vectors.")
+        if self.count() == 0 or self.embedding_matrix is None:
+            return []
+
+        raw_vec = embedding_service.get_embedding(query)
+        return self.search_by_vector(raw_vec, top_k=top_k, where_filter=where_filter)
 
 claim_vector_store = ClaimVectorStore()
