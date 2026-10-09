@@ -31,3 +31,19 @@ def test_keyword_search_with_state_filter():
     assert isinstance(results, list)
     for r in results:
         assert r["state"].upper() == "CA"
+
+def test_hybrid_search_metadata_amount_and_prev_claims_filtering():
+    hybrid_retriever.initialize(max_records=500)
+    results = hybrid_retriever.search(
+        query="storm water damage claim",
+        top_k=5,
+        min_amount=1000.0,
+        max_amount=25000.0,
+        max_prev_claims=2
+    )
+    assert isinstance(results, list)
+    for r in results:
+        amt = float(r["claim_amount"])
+        assert 1000.0 <= amt <= 25000.0, f"Claim amount {amt} violated [1000, 25000] bounds"
+        prev_count = int(r["previous_claims_count"])
+        assert prev_count <= 2, f"Prior claims count {prev_count} exceeded limit of 2"

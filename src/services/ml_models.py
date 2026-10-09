@@ -170,7 +170,7 @@ class ClaimsMLService:
         if calibrated_fraud_score >= 18.0 or fraud_risk_score >= 45.0:
             risk_tier = "High Risk"
             risk_action = "Refer to SIU (Special Investigation Unit)"
-        elif calibrated_fraud_score >= 8.5 or fraud_risk_score >= 25.0:
+        elif calibrated_fraud_score >= 8.5 or fraud_risk_score >= 38.0:
             risk_tier = "Moderate Risk"
             risk_action = "Senior Adjuster Manual Review"
         else:

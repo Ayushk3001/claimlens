@@ -94,7 +94,25 @@ class HybridRetriever:
             doc["hybrid_score"] = round(0.45 + 0.53 * normalized_ratio, 4)
             combined.append(doc)
 
-        combined.sort(key=lambda x: (x["hybrid_score"], x.get("vector_similarity", 0.0), x.get("bm25_score", 0.0)), reverse=True)
-        return combined[:top_k]
+        # Apply strict filtering across all combined candidates to guarantee consistency
+        filtered_combined = []
+        for doc in combined:
+            if claim_type and str(doc.get("claim_type", "")).lower() != claim_type.lower():
+                continue
+            if state and str(doc.get("state", "")).upper() != state.upper():
+                continue
+            if claim_status and str(doc.get("claim_status", "")).lower() != claim_status.lower():
+                continue
+            amt = float(doc.get("claim_amount", 0.0))
+            if min_amount is not None and amt < min_amount:
+                continue
+            if max_amount is not None and amt > max_amount:
+                continue
+            if max_prev_claims is not None and int(doc.get("previous_claims_count", 0)) > max_prev_claims:
+                continue
+            filtered_combined.append(doc)
+
+        filtered_combined.sort(key=lambda x: (x["hybrid_score"], x.get("vector_similarity", 0.0), x.get("bm25_score", 0.0)), reverse=True)
+        return filtered_combined[:top_k]
 
 hybrid_retriever = HybridRetriever()

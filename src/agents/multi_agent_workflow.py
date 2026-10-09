@@ -147,7 +147,7 @@ class MultiAgentClaimsWorkflow:
                 "Notify policyholder that covered repair costs are absorbed within the elected deductible limit.",
                 "Close file with zero indemnity disbursement issued."
             ]
-        elif amt > 10000 or fraud_prob >= 32.0:
+        elif amt > 10000 or fraud_prob >= 38.0 or risk_analysis.get("risk_tier") in ["Moderate Risk", "High Risk"]:
             decision = "MANUAL_ADJUSTER_REVIEW"
             action = "Assign to Senior Claims Adjuster for detailed estimate audit."
             fast_track = False

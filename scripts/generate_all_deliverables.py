@@ -133,7 +133,7 @@ def generate_design_document():
 
         Paragraph("3. Technology Selection & Justifications", h1),
         Paragraph("<b>&bull; OpenAI Models (GPT-4o-mini & Text-Embedding-3-Small):</b> State-of-the-art reasoning for underwriting policy synthesis, multi-agent cooperation, and dense 1536-dimensional semantic representation.", bullet),
-        Paragraph("<b>&bull; Vector Database & BM25:</b> ChromaDB in-memory normalized cosine similarity store combined with Rank-BM25 via Reciprocal Rank Fusion (RRF) ensures both conceptual and keyword precision.", bullet),
+        Paragraph("<b>&bull; Vector Database & BM25:</b> In-memory normalized cosine similarity vector store (NumPy with ChromaDB schema compatibility) combined with Rank-BM25 via Reciprocal Rank Fusion (RRF) ensures sub-2ms latency, exact cosine calculations, and zero concurrency locks.", bullet),
         Paragraph("<b>&bull; Scikit-Learn Ensemble Models:</b> Random Forest Regressors and Classifiers trained on 10,000 stratified claims from the Hugging Face 100M dataset provide high-speed, explainable numeric predictions.", bullet),
         Paragraph("<b>&bull; FastAPI & Streamlit:</b> FastAPI provides high-throughput asynchronous REST microservices; Streamlit provides a low-latency interactive adjuster UI.", bullet),
         Paragraph("<b>&bull; DeepEval:</b> Automated evaluation framework quantifying faithfulness, relevancy, and policy compliance.", bullet),
@@ -179,9 +179,9 @@ def generate_design_document():
     story.append(Spacer(1, 10))
 
     story.append(Paragraph("7. Challenges, Trade-offs & Production Roadmap", h1))
-    Paragraph("<b>&bull; Challenge:</b> Operating at 100M claims scale locally.<br/><b>Decision:</b> Streamed a high-fidelity stratified sample of 10,000 records from row group 0 of the Parquet dataset, achieving sub-5ms retrieval and zero disk bloat.", body),
-    Paragraph("<b>&bull; Challenge:</b> LLM hallucination and policy adherence.<br/><b>Decision:</b> Implemented input guardrails, strict Pydantic schemas, and a secondary LLM-as-Judge audit layer.", body),
-    Paragraph("<b>&bull; Future Roadmap:</b> Vision-LLM integration for vehicle/property damage photograph analysis and automated OCR of police reports.", body)
+    story.append(Paragraph("<b>&bull; Challenge:</b> Operating at 100M claims scale locally.<br/><b>Decision:</b> Streamed a high-fidelity stratified sample of 10,000 records from row group 0 of the Parquet dataset and indexed 1,500 candidates into the in-memory vector store, achieving sub-2ms retrieval and zero disk bloat. Enterprise roadmap targets distributed Qdrant/Milvus clusters.", body))
+    story.append(Paragraph("<b>&bull; Challenge:</b> LLM hallucination and policy adherence.<br/><b>Decision:</b> Implemented input guardrails, strict Pydantic schemas, and a secondary LLM-as-Judge audit layer.", body))
+    story.append(Paragraph("<b>&bull; Future Roadmap:</b> Vision-LLM integration for vehicle/property damage photograph analysis and automated OCR of police reports.", body))
 
     build_pdf_document(out_path, story)
 

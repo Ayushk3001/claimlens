@@ -105,5 +105,49 @@
     "confirmed_fraud": null,
     "notes": "",
     "created_at": "2026-10-08T16:03:31.906140Z"
+  },
+  {
+    "feedback_id": "FB-00011",
+    "claim_id": "CLM-0000000001",
+    "adjuster_id": "ADJ-SENIOR-TEST",
+    "adjuster_decision": "Sent to SIU",
+    "agrees_with_ai": true,
+    "adjusted_amount": 4200.0,
+    "confirmed_fraud": true,
+    "notes": "Verified intentional damage pattern.",
+    "created_at": "2026-10-09T06:52:50.421348Z"
+  },
+  {
+    "feedback_id": "FB-00012",
+    "claim_id": "CLM-0000000009",
+    "adjuster_id": "ADJ-TEST-AUDIT",
+    "adjuster_decision": "Approved",
+    "agrees_with_ai": true,
+    "adjusted_amount": 2500.0,
+    "confirmed_fraud": null,
+    "notes": "",
+    "created_at": "2026-10-09T06:52:53.623104Z"
+  },
+  {
+    "feedback_id": "FB-00013",
+    "claim_id": "CLM-0000000001",
+    "adjuster_id": "ADJ-SENIOR-TEST",
+    "adjuster_decision": "Sent to SIU",
+    "agrees_with_ai": true,
+    "adjusted_amount": 4200.0,
+    "confirmed_fraud": true,
+    "notes": "Verified intentional damage pattern.",
+    "created_at": "2026-10-09T06:56:18.875504Z"
+  },
+  {
+    "feedback_id": "FB-00014",
+    "claim_id": "CLM-0000000009",
+    "adjuster_id": "ADJ-TEST-AUDIT",
+    "adjuster_decision": "Approved",
+    "agrees_with_ai": true,
+    "adjusted_amount": 2500.0,
+    "confirmed_fraud": null,
+    "notes": "",
+    "created_at": "2026-10-09T06:56:24.529667Z"
   }
 ]
