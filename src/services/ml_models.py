@@ -166,11 +166,47 @@ class ClaimsMLService:
         fraud_risk_score = round(raw_prob * 100, 1)
         calibrated_fraud_score = round(calibrated_prob * 100, 1)
 
+        # Underwriting policy flags (rule-based)
+        policy_flags = []
+        c_amt = float(claim_data.get("claim_amount", 0))
+        c_ded = float(claim_data.get("deductible", 500))
+        tenure = float(claim_data.get("policyholder_tenure_years", 3.0))
+        prev_count = int(claim_data.get("previous_claims_count", 0))
+
+        if tenure < 1.0:
+            policy_flags.append(f"Short policy tenure ({tenure:.1f} yrs) provides low historical policyholder baseline.")
+        if prev_count >= 2:
+            policy_flags.append(f"Elevated prior claim frequency ({prev_count} previous claims filed).")
+        if c_amt > 15000:
+            policy_flags.append(f"Claim amount (${c_amt:,.2f}) is in the top quartile of loss distributions.")
+        if c_amt > 0 and c_ded > 0 and (c_amt / c_ded) > 20:
+            policy_flags.append(f"Disproportionate claim-to-deductible ratio ({c_amt/c_ded:.1f}x).")
+
+        # Hybrid Underwriting Risk Fusion:
+        # Prevent ML tabular blindspots on acute moral hazard (early inception + chronic loss frequency + high loss on new policy)
+        policy_risk_bump = 0.0
+        if tenure < 0.5 and (prev_count >= 1 or c_amt > 15000):
+            policy_risk_bump += 12.0
+            policy_flags.append(f"Acute inception risk: severe loss reported within {tenure:.1f} yrs of policy inception.")
+        elif tenure < 1.0 and prev_count >= 1:
+            policy_risk_bump += 6.0
+
+        if prev_count >= 4:
+            policy_risk_bump += 18.0
+            policy_flags.append(f"Severe loss frequency anomaly: {prev_count} prior claims on record.")
+        elif prev_count >= 2 and tenure < 2.0:
+            policy_risk_bump += 8.0
+
+        if tenure < 1.0 and c_amt > 30000:
+            policy_risk_bump += 5.0
+
+        composite_fraud_score = round(min(98.5, fraud_risk_score + policy_risk_bump), 1)
+
         # Risk classification (calibrated for 8.5% industry prevalence and aligned with SIU escalation >=45%)
-        if calibrated_fraud_score >= 18.0 or fraud_risk_score >= 45.0:
+        if calibrated_fraud_score >= 18.0 or composite_fraud_score >= 45.0:
             risk_tier = "High Risk"
             risk_action = "Refer to SIU (Special Investigation Unit)"
-        elif calibrated_fraud_score >= 8.5 or fraud_risk_score >= 38.0:
+        elif calibrated_fraud_score >= 8.5 or composite_fraud_score >= 38.0:
             risk_tier = "Moderate Risk"
             risk_action = "Senior Adjuster Manual Review"
         else:
@@ -202,22 +238,6 @@ class ClaimsMLService:
             else:
                 heuristic_impact[name] = 0.0
 
-        # Underwriting policy flags (rule-based)
-        policy_flags = []
-        c_amt = float(claim_data.get("claim_amount", 0))
-        c_ded = float(claim_data.get("deductible", 500))
-        tenure = float(claim_data.get("policyholder_tenure_years", 3.0))
-        prev_count = int(claim_data.get("previous_claims_count", 0))
-
-        if tenure < 1.0:
-            policy_flags.append(f"Short policy tenure ({tenure:.1f} yrs) provides low historical policyholder baseline.")
-        if prev_count >= 2:
-            policy_flags.append(f"Elevated prior claim frequency ({prev_count} previous claims filed).")
-        if c_amt > 15000:
-            policy_flags.append(f"Claim amount (${c_amt:,.2f}) is in the top quartile of loss distributions.")
-        if c_amt > 0 and c_ded > 0 and (c_amt / c_ded) > 20:
-            policy_flags.append(f"Disproportionate claim-to-deductible ratio ({c_amt/c_ded:.1f}x).")
-
         # Top Risk Drivers with clear provenance labels
         risk_drivers = []
         for pf in policy_flags:
@@ -234,7 +254,9 @@ class ClaimsMLService:
             "predicted_claim_amount": round(predicted_amount, 2),
             "estimated_amount_range": f"${amount_lower:,.2f} - ${amount_upper:,.2f}",
             "predicted_days_to_resolution": predicted_days,
-            "fraud_probability_percent": fraud_risk_score,
+            "fraud_probability_percent": composite_fraud_score,
+            "raw_ml_fraud_score": fraud_risk_score,
+            "policy_risk_adjustment": policy_risk_bump,
             "calibrated_fraud_probability_percent": calibrated_fraud_score,
             "risk_tier": risk_tier,
             "recommended_workflow": risk_action,
