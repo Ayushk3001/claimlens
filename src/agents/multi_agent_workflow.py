@@ -107,7 +107,8 @@ class MultiAgentClaimsWorkflow:
         """Agent 3: Synthesizes investigation and risk findings into handling decisions with strict financial settlement rules."""
         fraud_prob = risk_analysis.get("fraud_probability_percent", 0.0)
         amt = float(claim_data.get("claim_amount", 0))
-        deductible = float(claim_data.get("deductible", 500))
+        ded_val = claim_data.get("deductible") if claim_data.get("deductible") is not None else claim_data.get("policy_deductible", 500)
+        deductible = float(ded_val)
         predicted_amt = ml_results.get("predicted_claim_amount", amt)
         c_type = str(claim_data.get("claim_type", "Auto")).capitalize()
 
@@ -154,8 +155,8 @@ class MultiAgentClaimsWorkflow:
             fast_track = False
             auth_status = "PENDING_SENIOR_ADJUSTER_SIGN_OFF"
 
-            # Bounded net settlement range: never exceeds (claim_amount - deductible)
-            est_base_loss = min(amt, predicted_amt)
+            # Bounded net settlement range: evaluated based on documented loss, bounded by max_net_payout
+            est_base_loss = amt
             lower_net = max(0.0, round(est_base_loss * 0.85 - deductible, 2))
             upper_net = max(lower_net, round(min(max_net_payout, est_base_loss - deductible), 2))
             recommended_net = upper_net
@@ -236,7 +237,8 @@ class MultiAgentClaimsWorkflow:
     ) -> Dict[str, Any]:
         """LLM-as-Judge validation module evaluating factual consistency, completeness, and financial compliance."""
         amt = float(claim_data.get("claim_amount", 0))
-        deductible = float(claim_data.get("deductible", 500))
+        ded_val = claim_data.get("deductible") if claim_data.get("deductible") is not None else claim_data.get("policy_deductible", 500)
+        deductible = float(ded_val)
         fraud_prob = float(risk_analysis.get("fraud_probability_percent", 0.0))
         decision = str(recommendation.get("decision", ""))
 

@@ -1,5 +1,5 @@
 {
-  "evaluation_timestamp": "2026-10-09T10:01:42Z",
+  "evaluation_timestamp": "2026-10-09T12:06:47Z",
   "evaluation_framework": "LLM-as-Judge & Deterministic Invariant Auditing",
   "methodology_notes": "Scores are derived directly from the multi-agent LLM Judge evaluation dimensions (factual consistency, completeness, and underwriting policy compliance) combined with deterministic financial invariant validation. Metric values are validated for finite range [0.0, 10.0]. No static fallback scores or simulated DeepEval proxies are utilized.",
   "benchmark_tests_count": 3,
@@ -38,7 +38,7 @@
       "expected_decision": "SIU_REFERRAL",
       "actual_decision": "SIU_REFERRAL",
       "decision_aligned": true,
-      "raw_fraud_probability_percent": 46.4,
+      "raw_fraud_probability_percent": 71.4,
       "calibrated_fraud_probability_percent": 8.1,
       "constraints_passed": true,
       "constraint_notes": [],
